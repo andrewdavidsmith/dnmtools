@@ -155,7 +155,8 @@ libdnmtools_a_SOURCES = \
         src/common/TwoStateHMM.cpp \
         src/common/TwoStateHMM_PMD.cpp \
         src/common/bsutils.cpp \
-        src/common/numerical_utils.cpp
+        src/common/numerical_utils.cpp \
+        src/common/dnmt_logger.cpp
 
 libdnmtools_a_SOURCES += \
 	src/bamxx/bamxx.hpp \
@@ -173,7 +174,8 @@ libdnmtools_a_SOURCES += \
         src/common/TwoStateHMM_PMD.hpp \
         src/common/bsutils.hpp \
         src/common/numerical_utils.hpp \
-        src/common/dnmt_error.hpp
+        src/common/dnmt_error.hpp \
+        src/common/dnmt_logger.hpp
 
 # ADS: additional radmeth sources to help isolate the parts using GSL for
 # optimization
