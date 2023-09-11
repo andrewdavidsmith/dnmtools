@@ -23,6 +23,7 @@
 #include <unordered_set>
 #include <cstdint> // for [u]int[0-9]+_t
 #include <random>
+#include <chrono>
 
 #include <bamxx.hpp>
 
@@ -31,6 +32,7 @@
 #include "GenomicRegion.hpp"
 #include "OptionParser.hpp"
 
+#include "dnmt_logger.hpp"
 #include "TwoStateHMM.hpp"
 #include "MSite.hpp"
 
@@ -186,13 +188,13 @@ build_domains(const bool VERBOSE,
 
 template <class T, class U>
 static void
-separate_regions(const bool VERBOSE,
+separate_regions(const bool VERBOSE, dnmt_logger &log,
                  const size_t desert_size,
                  vector<MSite> &cpgs,
                  vector<T> &meth, vector<U> &reads,
                  vector<size_t> &reset_points) {
   if (VERBOSE)
-    cerr << "[separating by cpg desert]" << endl;
+    log.log_event("separating by cpg desert");
   // eliminate the zero-read cpgs
   size_t j = 0;
   for (size_t i = 0; i < cpgs.size(); ++i)
@@ -225,13 +227,13 @@ separate_regions(const bool VERBOSE,
   }
   reset_points.push_back(cpgs.size());
 
-  if (VERBOSE)
-    cerr << "[cpgs retained: " << cpgs.size() << "]" << endl
-         << "[deserts removed: " << reset_points.size() - 2 << "]" << endl
-         << "[genome fraction covered: "
-         << 1.0 - (bases_in_deserts/total_bases) << "]" << endl;
+  if (VERBOSE) {
+    log.log_data("cpgs_retained", to_string(cpgs.size()));
+    log.log_data("deserts_removed", to_string(reset_points.size() - 2));
+    const auto frac_cov = 1.0 - (bases_in_deserts/total_bases);
+    log.log_data("genome_fraction_covered", to_string(frac_cov));
+  }
 }
-
 
 /* function to "fold" the methylation profile so that the middle
  * methylation becomes lower methylation, and both the low and high
@@ -477,6 +479,9 @@ main_hmr(int argc, const char **argv) {
     const string cpgs_file = leftover_args.front();
     /****************** END COMMAND LINE OPTIONS *****************/
 
+
+    dnmt_logger log(std::clog, "hmr: ");
+
     if (!is_msite_file(cpgs_file))
       throw runtime_error("malformed counts file: " + cpgs_file);
 
@@ -484,25 +489,30 @@ main_hmr(int argc, const char **argv) {
     vector<MSite> cpgs;
     vector<pair<double, double> > meth;
     vector<uint32_t> reads;
+    auto log_time_point = std::chrono::steady_clock::now();
     if (VERBOSE)
-      cerr << "[reading methylation levels]" << endl;
+      log_time_point = log.log_event("reading methylation levels");
     load_cpgs(cpgs_file, cpgs, meth, reads);
+    if (VERBOSE)
+      log.log_event("done reading methylation levels", log_time_point);
 
     if (VERBOSE)
-      cerr << "[checking if input is properly formatted]" << endl;
+      log_time_point = log.log_event("checking if input is properly formatted");
     check_sorted_within_chroms(begin(cpgs), end(cpgs));
     if (PARTIAL_METH)
       make_partial_meth(reads, meth);
 
-    if (VERBOSE)
-      cerr << "[total_cpgs=" << cpgs.size() << "]" << endl
-           << "[mean_coverage="
-           << get_mean(begin(reads), end(reads)) << "]" << endl;
+    if (VERBOSE) {
+      log.log_data("total_cpgs", to_string(cpgs.size()));
+      const auto x = get_mean(cbegin(reads), cend(reads));
+      log.log_data("mean_coverage", to_string(x));
+    }
 
     // separate the regions by chrom and by desert, and eliminate
     // those isolated CpGs
     vector<size_t> reset_points;
-    separate_regions(VERBOSE, desert_size, cpgs, meth, reads, reset_points);
+    separate_regions(VERBOSE, log, desert_size, cpgs, meth, reads,
+                     reset_points);
 
     const TwoStateHMM hmm(tolerance, max_iterations, VERBOSE);
 
@@ -571,7 +581,7 @@ main_hmr(int argc, const char **argv) {
 
     if (!hypo_post_outfile.empty()) {
       if (VERBOSE)
-        cerr << "[writing=" << hypo_post_outfile << "]" << endl;
+        log.log_event("writing hypo poseriors to file " + hypo_post_outfile);
       std::ofstream out(hypo_post_outfile);
       for (size_t i = 0; i < cpgs.size(); ++i) {
         GenomicRegion cpg(as_gen_rgn(cpgs[i]));
@@ -584,7 +594,8 @@ main_hmr(int argc, const char **argv) {
     if (!meth_post_outfile.empty()) {
       std::ofstream out(meth_post_outfile);
       if (VERBOSE)
-        cerr << "[writing=" << meth_post_outfile << "]" << endl;
+        log.log_event("writing methylation poseriors to file " +
+                      meth_post_outfile);
       for (size_t i = 0; i < cpgs.size(); ++i) {
         GenomicRegion cpg(as_gen_rgn(cpgs[i]));
         cpg.set_name(format_cpg_meth_tag(meth[i]));

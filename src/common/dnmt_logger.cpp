@@ -15,40 +15,42 @@
 
 #include "dnmt_logger.hpp"
 
-using std::chrono;
-using std::string;
+#include <iomanip>
 using std::ostream;
+using std::string;
+
+using std::chrono::duration;
+using std::chrono::steady_clock;
+using std::chrono::time_point;
 
 using std::endl;
 
-chrono::steady_clock
-log_event(string message) {
-  out << prefix << message << endl;
-  return chrono::steady_clock::now();
+time_point<steady_clock>
+dnmt_logger::log_event(string message) {
+  log_stream << prefix << message << endl;
+  return steady_clock::now();
 }
 
-chrono::steady_clock
-log_event(string message, chrono::steady_clock then) {
+time_point<steady_clock>
+dnmt_logger::log_event(string message, time_point<steady_clock> then) {
   const auto now = steady_clock::now();
-  out << prefix << message
-    // oss.setf(std::ios::fixed);
-    // oss.precision(2);
-      << "[delta time: "
-      << duration<double>(then - now).count() << "s]"
-      << endl;
-  return chrono::steady_clock::now();
+  log_stream << prefix << message << " "
+             << "[delta time: " << std::fixed << std::setprecision(2)
+             << duration<double>(now - then).count() << "s]" << endl;
+  return steady_clock::now();
 }
 
-chrono::steady_clock
-log_data(string key, string value) {
-  out << prefix << key << "=" << value
-      << endl;
-  return chrono::steady_clock::now();
+time_point<steady_clock>
+dnmt_logger::log_data(string key, string value) {
+  log_stream << prefix << key << "=" << value << endl;
+  return steady_clock::now();
 }
 
-chrono::steady_clock
-log_data(string key, string value, chrono::steady_clock sc) {
-  out << prefix << key << "=" << value
-      << endl;
-  return chrono::steady_clock::now();
+time_point<steady_clock>
+dnmt_logger::log_data(string key, string value, time_point<steady_clock> then) {
+  const auto now = steady_clock::now();
+  log_stream << prefix << key << "=" << value << " "
+             << "[delta time: " << std::fixed << std::setprecision(2)
+             << duration<double>(now - then).count() << "s]" << endl;
+  return steady_clock::now();
 }
