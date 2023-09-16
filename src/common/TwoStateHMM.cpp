@@ -26,6 +26,8 @@
 
 #include "smithlab_utils.hpp"
 
+#include "dnmt_logger.hpp"
+
 using std::vector;
 using std::pair;
 using std::setw;
@@ -395,20 +397,20 @@ single_iteration(const vector<pair<double, double> > &values,
 
 static void
 report_param_header_for_verbose() {
-  cerr << setw(3) << "ITR"
-       << setw(8) << "F size"
-       << setw(8) << "B size"
-       << setw(14) << "F PARAMS"
-       << setw(14) << "B PARAMS"
-       << setw(11) << "DELTA"
-       << endl;
+  std::ostringstream oss;
+  oss << setw(3) << "ITR"
+      << setw(8) << "F size"
+      << setw(8) << "B size"
+      << setw(14) << "F PARAMS"
+      << setw(14) << "B PARAMS"
+      << setw(11) << "DELTA";
+  dnmt_logger::get().log_event(oss.str());
 }
 
 static inline double
 get_delta(const double a, const double b) {
   return (b - a)/max(abs(a), abs(b));
 }
-
 
 static void
 report_params_for_verbose(const size_t i,
@@ -418,17 +420,18 @@ report_params_for_verbose(const size_t i,
                           const TwoStateBetaBin &bg_distro,
                           const double total,
                           const double prev_total) {
-  std::ios_base::fmtflags orig_flags(cerr.flags());
-  cerr.precision(2);
-  cerr << setw(3) << i + 1
-       << setw(8) << std::fixed << 1/p_fb_est
-       << setw(8) << std::fixed << 1/p_bf_est
-       << setw(14) << fg_distro.tostring()
-       << setw(14) << bg_distro.tostring()
-       << setw(11) << std::scientific
-       << abs(get_delta(prev_total, total))
-       << endl;
-  cerr.flags(orig_flags);
+  // std::ios_base::fmtflags orig_flags(cerr.flags());
+  // cerr.precision(2);
+  std::ostringstream oss;
+  oss.precision(2);
+  oss << setw(3) << i + 1
+      << setw(8) << std::fixed << 1/p_fb_est
+      << setw(8) << std::fixed << 1/p_bf_est
+      << setw(14) << fg_distro.tostring()
+      << setw(14) << bg_distro.tostring()
+      << setw(11) << std::scientific
+      << abs(get_delta(prev_total, total));
+  dnmt_logger::get().log_event(oss.str());
 }
 
 
@@ -492,12 +495,12 @@ TwoStateHMM::BaumWelchTraining(const vector<pair<double, double> > &values,
     // ADS: removing the check based on expected log likelihood from
     // forward/backward as these seem to have some problem...
     converged = ((get_delta(p_fb_est, p_fb) < tolerance) &&
-		 (get_delta(p_bf_est, p_bf) < tolerance));
+                 (get_delta(p_bf_est, p_bf) < tolerance));
     // converged = (get_delta(prev_total, total) < tolerance);
 
     if (converged) {
       if (VERBOSE)
-        cerr << "CONVERGED" << endl;
+        dnmt_logger::get().log_event("CONVERGED");
     }
     else {
       p_fb = p_fb_est;
@@ -1023,7 +1026,7 @@ TwoStateHMM::BaumWelchTraining(const vector<vector<pair<double, double> > > &val
     // ADS: removing the check based on expected log likelihood from
     // forward/backward as these seem to have some problem...
     converged = ((get_delta(p_fb_est, p_fb) < tolerance) &&
-		 (get_delta(p_bf_est, p_bf) < tolerance));
+                 (get_delta(p_bf_est, p_bf) < tolerance));
     // converged = (get_delta(prev_total, total) < tolerance);
 
     if (converged) {
