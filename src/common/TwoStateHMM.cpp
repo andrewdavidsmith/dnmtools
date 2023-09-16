@@ -26,8 +26,6 @@
 
 #include "smithlab_utils.hpp"
 
-#include "dnmt_logger.hpp"
-
 using std::vector;
 using std::pair;
 using std::setw;
@@ -404,7 +402,7 @@ report_param_header_for_verbose() {
       << setw(14) << "F PARAMS"
       << setw(14) << "B PARAMS"
       << setw(11) << "DELTA";
-  dnmt_logger::get().log_event(oss.str());
+  std::cerr << oss.str() << std::endl;
 }
 
 static inline double
@@ -431,7 +429,7 @@ report_params_for_verbose(const size_t i,
       << setw(14) << bg_distro.tostring()
       << setw(11) << std::scientific
       << abs(get_delta(prev_total, total));
-  dnmt_logger::get().log_event(oss.str());
+  cerr << oss.str() << endl;
 }
 
 
@@ -500,7 +498,7 @@ TwoStateHMM::BaumWelchTraining(const vector<pair<double, double> > &values,
 
     if (converged) {
       if (VERBOSE)
-        dnmt_logger::get().log_event("CONVERGED");
+        std::cerr << "CONVERGED" << std::endl;
     }
     else {
       p_fb = p_fb_est;
