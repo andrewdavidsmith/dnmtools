@@ -19,14 +19,16 @@
 #include <chrono>
 #include <ostream>
 #include <string>
+#include <iostream>
 
 struct dnmt_logger {
   std::ostream &log_stream;
   std::string prefix;
 
-  dnmt_logger(std::ostream &ls): log_stream{ls}, prefix{} {}
-
-  dnmt_logger(std::ostream &ls, std::string &&p): log_stream{ls}, prefix{p} {}
+  static dnmt_logger &get(std::ostream &ls = std::cout, std::string p = "") {
+    static dnmt_logger instance(ls, p);
+    return instance;
+  }
 
   std::chrono::time_point<std::chrono::steady_clock>
   log_event(std::string message);
@@ -38,6 +40,10 @@ struct dnmt_logger {
   std::chrono::time_point<std::chrono::steady_clock>
   log_data(std::string key, std::string value,
            std::chrono::time_point<std::chrono::steady_clock> sclk);
+private:
+  dnmt_logger(std::ostream &ls, std::string p): log_stream{ls}, prefix{p} {}
 };
+
+typedef dnmt_logger& dnmt_logger_ref;
 
 #endif

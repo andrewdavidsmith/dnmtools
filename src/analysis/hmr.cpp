@@ -479,8 +479,9 @@ main_hmr(int argc, const char **argv) {
     const string cpgs_file = leftover_args.front();
     /****************** END COMMAND LINE OPTIONS *****************/
 
+    // dnmt_logger::initialize(std::clog, "hmr");
 
-    dnmt_logger log(std::clog, "hmr: ");
+    dnmt_logger_ref log = dnmt_logger::get(std::clog, "hmr");
 
     if (!is_msite_file(cpgs_file))
       throw runtime_error("malformed counts file: " + cpgs_file);

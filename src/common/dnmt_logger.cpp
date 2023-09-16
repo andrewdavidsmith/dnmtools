@@ -18,6 +18,7 @@
 #include <iomanip>
 #include <vector>
 #include <string>
+#include <ctime>
 
 using std::ostream;
 using std::string;
@@ -31,77 +32,77 @@ using std::timespec;
 using std::timespec_get;
 using std::strftime;
 
-using std::endl;
-
 static inline string
 format_current_time() {
-  static constexpr auto time_format = "%D %T";
+  static constexpr auto time_template = "[%D %T]";
   timespec ts;
   timespec_get(&ts, TIME_UTC);
   vector<char> buf(128);
-  strftime(buf.data(), std::size(buf), time_format, std::gmtime(&ts.tv_sec));
+  strftime(buf.data(), std::size(buf), time_template, std::gmtime(&ts.tv_sec));
   return buf.data();
 }
 
 time_point<steady_clock>
 dnmt_logger::log_event(string message) {
-  static constexpr auto event_tag = "[event] ";
-  log_stream << prefix
-             << event_tag
-             << message
-             << '\n';
+  static constexpr auto event_tag = "[event]";
+
+  log_stream << prefix << ' '
+             << format_current_time() << ' '
+             << event_tag << ' '
+             << message << '\n';
+
   return steady_clock::now();
 }
 
 time_point<steady_clock>
 dnmt_logger::log_event(string message, time_point<steady_clock> then) {
-  static constexpr auto event_tag = "[event] ";
-  static constexpr auto time_tag_left = " [delta time: ";
-  static constexpr auto time_tag_right = "s]";
+  static constexpr auto event_tag = "[event]";
+  static constexpr auto delta_time_template = "[delta time: %.3fs]";
+
   const auto now = steady_clock::now();
   const auto delta_time = duration<double>(now - then).count();
 
-  string formatted_data_and_time(128);
-  snprintf(formatted_data_and_time.data(),
-           128ul, time_format_template);
-
-  log_stream << prefix << event_tag << message << time_tag_left << std::fixed
-             << std::setprecision(2) << delta_time << time_tag_right
-             << " " << format_current_time() << '\n';
+  string formatted_delta_time(128, '\0');
+  std::snprintf(formatted_delta_time.data(), std::size(formatted_delta_time),
+                delta_time_template, delta_time);
+  log_stream << prefix << ' '
+             << format_current_time() << ' '
+             << event_tag << ' '
+             << message << ' '
+             << formatted_delta_time << '\n';
   return steady_clock::now();
 }
 
 time_point<steady_clock>
 dnmt_logger::log_data(string key, string value) {
-  static constexpr auto data_tag = "[data] ";
-  log_stream << prefix << data_tag << key << "=" << value << '\n';
+  static constexpr auto data_tag = "[data]";
+  // clang-format off
+  log_stream << prefix << ' '
+             << format_current_time() << ' '
+             << data_tag << ' '
+             << key << '=' << value
+             << '\n';
+  // clang-format on
   return steady_clock::now();
 }
 
 time_point<steady_clock>
 dnmt_logger::log_data(string key, string value, time_point<steady_clock> then) {
-  static constexpr auto data_tag = "[data] ";
-  static constexpr auto time_tag_left = " [delta time: ";
-  static constexpr auto time_tag_right = "s]";
+  static constexpr auto data_tag = "[data]";
+  static constexpr auto delta_time_template = "[delta time: %.3fs]";
+
   const auto now = steady_clock::now();
   const auto delta_time = duration<double>(now - then).count();
-  log_stream << prefix << data_tag << key << '=' << value << time_tag_left
-             << std::fixed << std::setprecision(2) << delta_time
-             << time_tag_right << '\n';
+
+  string formatted_delta_time(128, '\0');
+  std::snprintf(formatted_delta_time.data(), std::size(formatted_delta_time),
+                delta_time_template, delta_time);
+  // clang-format off
+  log_stream << prefix << ' '
+             << format_current_time() << ' '
+             << data_tag << ' '
+             << key << '=' << value << ' '
+             << formatted_delta_time << '\n';
+  // clang-format on
   return steady_clock::now();
 }
-
-
-// static void
-// print_with_time(const string &s) {
-//   std::timespec ts;
-//   std::timespec_get(&ts, TIME_UTC);
-//   vector<char> buf(128, '\0');
-//   std::strftime(buf, std::size(buf), "%D %T", std::gmtime(&ts.tv_sec));
-//   std::cout << "Current time: " << buf << '.' << ts.tv_nsec << " UTC\n";
-
-//   auto tmp = system_clock::to_time_t(system_clock::now());
-//   string time_fmt(std::ctime(&tmp));
-//   time_fmt.pop_back();
-//   cerr << "[" << time_fmt << "] " << s << endl;
-// }
