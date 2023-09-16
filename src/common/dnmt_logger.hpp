@@ -17,33 +17,38 @@
 #define DNMT_LOGGER_HPP
 
 #include <chrono>
+#include <iostream>
 #include <ostream>
 #include <string>
-#include <iostream>
 
 struct dnmt_logger {
-  std::ostream &log_stream;
-  std::string prefix;
 
-  static dnmt_logger &get(std::ostream &ls = std::cout, std::string p = "") {
+  static auto get(std::ostream &ls = std::clog, std::string p = "")
+    -> dnmt_logger & {
     static dnmt_logger instance(ls, p);
     return instance;
   }
 
-  std::chrono::time_point<std::chrono::steady_clock>
-  log_event(std::string message);
-  std::chrono::time_point<std::chrono::steady_clock>
-  log_event(std::string message,
-            std::chrono::time_point<std::chrono::steady_clock> sclk);
-  std::chrono::time_point<std::chrono::steady_clock>
-  log_data(std::string key, std::string value);
-  std::chrono::time_point<std::chrono::steady_clock>
-  log_data(std::string key, std::string value,
-           std::chrono::time_point<std::chrono::steady_clock> sclk);
+  auto log_event(std::string message)
+    -> std::chrono::time_point<std::chrono::steady_clock>;
+
+  auto log_event(std::string message,
+                 std::chrono::time_point<std::chrono::steady_clock> sclk)
+    -> std::chrono::time_point<std::chrono::steady_clock>;
+
+  auto log_data(std::string key, std::string value)
+    -> std::chrono::time_point<std::chrono::steady_clock>;
+
+  auto log_data(std::string key, std::string value,
+                std::chrono::time_point<std::chrono::steady_clock> sclk)
+    -> std::chrono::time_point<std::chrono::steady_clock>;
+
 private:
+  std::ostream &log_stream;
+  std::string prefix;
   dnmt_logger(std::ostream &ls, std::string p): log_stream{ls}, prefix{p} {}
 };
 
-typedef dnmt_logger& dnmt_logger_ref;
+typedef dnmt_logger &dnmt_logger_ref;
 
 #endif
