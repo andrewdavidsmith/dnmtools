@@ -58,7 +58,7 @@ struct hmr_summary {
     hmr_total_size = accumulate(cbegin(hmrs), cend(hmrs), 0,
                                 [](const uint64_t t, const GenomicRegion &p) {
                                   return t + p.get_width(); });
-    hmr_mean_size = 
+    hmr_mean_size =
       static_cast<double>(hmr_total_size)/std::max(1ul, hmr_count);
   }
   // hmr_count is the number of identified HMRs.
@@ -188,13 +188,13 @@ build_domains(const bool VERBOSE,
 
 template <class T, class U>
 static void
-separate_regions(const bool VERBOSE, dnmt_logger &log,
+separate_regions(const bool VERBOSE,
                  const size_t desert_size,
                  vector<MSite> &cpgs,
                  vector<T> &meth, vector<U> &reads,
                  vector<size_t> &reset_points) {
   if (VERBOSE)
-    log.log_event("separating by cpg desert");
+    dnmt_log::event("separating by cpg desert");
   // eliminate the zero-read cpgs
   size_t j = 0;
   for (size_t i = 0; i < cpgs.size(); ++i)
@@ -228,10 +228,10 @@ separate_regions(const bool VERBOSE, dnmt_logger &log,
   reset_points.push_back(cpgs.size());
 
   if (VERBOSE) {
-    log.log_data("cpgs_retained", to_string(cpgs.size()));
-    log.log_data("deserts_removed", to_string(reset_points.size() - 2));
+    dnmt_log::data("cpgs_retained", to_string(cpgs.size()));
+    dnmt_log::data("deserts_removed", to_string(reset_points.size() - 2));
     const auto frac_cov = 1.0 - (bases_in_deserts/total_bases);
-    log.log_data("genome_fraction_covered", to_string(frac_cov));
+    dnmt_log::data("genome_fraction_covered", to_string(frac_cov));
   }
 }
 
@@ -417,6 +417,7 @@ main_hmr(int argc, const char **argv) {
     const double tolerance = 1e-10;
 
     string summary_file;
+    string log_file;
 
     string params_in_file;
     string params_out_file;
@@ -454,8 +455,9 @@ main_hmr(int argc, const char **argv) {
     opt_parse.add_opt("params-out", 'p', "write HMM parameters to this "
                       "file (default: none)", false, params_out_file);
     opt_parse.add_opt("seed", 's', "specify random seed", false, rng_seed);
-    opt_parse.add_opt("summary", 'S', "write summary output here", false, 
+    opt_parse.add_opt("summary", 'S', "write summary output here", false,
                       summary_file);
+    opt_parse.add_opt("log", '\0', "log file", false, log_file);
     opt_parse.set_show_defaults();
     vector<string> leftover_args;
     opt_parse.parse(argc, argv, leftover_args);
@@ -479,9 +481,7 @@ main_hmr(int argc, const char **argv) {
     const string cpgs_file = leftover_args.front();
     /****************** END COMMAND LINE OPTIONS *****************/
 
-    // dnmt_logger::initialize(std::clog, "hmr");
-
-    dnmt_logger_ref log = dnmt_logger::get(std::clog, "hmr");
+    dnmt_log::init("hmr", log_file);
 
     if (!is_msite_file(cpgs_file))
       throw runtime_error("malformed counts file: " + cpgs_file);
@@ -492,27 +492,29 @@ main_hmr(int argc, const char **argv) {
     vector<uint32_t> reads;
     auto log_time_point = std::chrono::steady_clock::now();
     if (VERBOSE)
-      log_time_point = log.log_event("reading methylation levels");
+      log_time_point = dnmt_log::event("reading methylation levels");
     load_cpgs(cpgs_file, cpgs, meth, reads);
-    if (VERBOSE)
-      log.log_event("done reading methylation levels", log_time_point);
+    if (VERBOSE) {
+      dnmt_log::event("done reading methylation levels", log_time_point);
+      // log.event("done reading methylation levels", log_time_point);
+    }
 
     if (VERBOSE)
-      log_time_point = log.log_event("checking if input is properly formatted");
+      log_time_point = dnmt_log::event("checking if input is properly formatted");
     check_sorted_within_chroms(begin(cpgs), end(cpgs));
     if (PARTIAL_METH)
       make_partial_meth(reads, meth);
 
     if (VERBOSE) {
-      log.log_data("total_cpgs", to_string(cpgs.size()));
+      dnmt_log::data("total_cpgs", to_string(cpgs.size()));
       const auto x = get_mean(cbegin(reads), cend(reads));
-      log.log_data("mean_coverage", to_string(x));
+      dnmt_log::data("mean_coverage", to_string(x));
     }
 
     // separate the regions by chrom and by desert, and eliminate
     // those isolated CpGs
     vector<size_t> reset_points;
-    separate_regions(VERBOSE, log, desert_size, cpgs, meth, reads,
+    separate_regions(VERBOSE, desert_size, cpgs, meth, reads,
                      reset_points);
 
     const TwoStateHMM hmm(tolerance, max_iterations, VERBOSE);
@@ -582,7 +584,7 @@ main_hmr(int argc, const char **argv) {
 
     if (!hypo_post_outfile.empty()) {
       if (VERBOSE)
-        log.log_event("writing hypo poseriors to file " + hypo_post_outfile);
+        dnmt_log::event("writing hypo poseriors to file " + hypo_post_outfile);
       std::ofstream out(hypo_post_outfile);
       for (size_t i = 0; i < cpgs.size(); ++i) {
         GenomicRegion cpg(as_gen_rgn(cpgs[i]));
@@ -595,7 +597,7 @@ main_hmr(int argc, const char **argv) {
     if (!meth_post_outfile.empty()) {
       std::ofstream out(meth_post_outfile);
       if (VERBOSE)
-        log.log_event("writing methylation poseriors to file " +
+        dnmt_log::event("writing methylation poseriors to file " +
                       meth_post_outfile);
       for (size_t i = 0; i < cpgs.size(); ++i) {
         GenomicRegion cpg(as_gen_rgn(cpgs[i]));
