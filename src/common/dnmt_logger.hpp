@@ -20,35 +20,91 @@
 #include <iostream>
 #include <ostream>
 #include <string>
+#include <fstream>
 
-struct dnmt_logger {
+namespace dnmt_log {
 
-  static auto get(std::ostream &ls = std::clog, std::string p = "")
-    -> dnmt_logger & {
-    static dnmt_logger instance(ls, p);
+struct screen {
+  static auto get(std::string p = "", std::ostream &ls = std::clog)
+    -> screen & {
+    static screen instance(p, ls);
     return instance;
   }
 
-  auto log_event(std::string message)
+  auto event(std::string message)
     -> std::chrono::time_point<std::chrono::steady_clock>;
 
-  auto log_event(std::string message,
-                 std::chrono::time_point<std::chrono::steady_clock> sclk)
+  auto event(std::string message,
+             std::chrono::time_point<std::chrono::steady_clock> scl)
     -> std::chrono::time_point<std::chrono::steady_clock>;
 
-  auto log_data(std::string key, std::string value)
+  auto data(std::string key, std::string value)
     -> std::chrono::time_point<std::chrono::steady_clock>;
 
-  auto log_data(std::string key, std::string value,
-                std::chrono::time_point<std::chrono::steady_clock> sclk)
+  auto data(std::string key, std::string value,
+            std::chrono::time_point<std::chrono::steady_clock> scl)
     -> std::chrono::time_point<std::chrono::steady_clock>;
-
 private:
-  std::ostream &log_stream;
   std::string prefix;
-  dnmt_logger(std::ostream &ls, std::string p): log_stream{ls}, prefix{p} {}
+  std::ostream &log_stream;
+
+  screen(std::string p, std::ostream &ls): prefix{p}, log_stream{ls} {}
 };
 
-typedef dnmt_logger &dnmt_logger_ref;
+typedef screen &screen_ref;
 
+struct logfile {
+  static auto get(std::string p = "", std::string fn = "") -> logfile & {
+    static logfile instance(p, fn);
+    return instance;
+  }
+
+  auto event(std::string message)
+    -> std::chrono::time_point<std::chrono::steady_clock>;
+
+  auto event(std::string message,
+             std::chrono::time_point<std::chrono::steady_clock> scl)
+    -> std::chrono::time_point<std::chrono::steady_clock>;
+
+  auto data(std::string key, std::string value)
+    -> std::chrono::time_point<std::chrono::steady_clock>;
+
+  auto data(std::string key, std::string value,
+            std::chrono::time_point<std::chrono::steady_clock> scl)
+    -> std::chrono::time_point<std::chrono::steady_clock>;
+private:
+  std::string prefix;
+  std::ofstream log_stream;
+
+  logfile(std::string p, std::string fn)
+    : prefix{p}, log_stream{std::ofstream(fn, std::ios_base::app)} {}
+};
+
+typedef logfile &logfile_ref;
+
+auto
+init(std::string p, std::string fn = "", std::ostream &ls = std::clog) -> void;
+
+auto
+init(std::string p, std::ostream &ls = std::clog) -> void;
+
+auto
+event(std::string message)
+  -> std::chrono::time_point<std::chrono::steady_clock>;
+
+auto
+event(std::string message,
+      std::chrono::time_point<std::chrono::steady_clock> scl)
+  -> std::chrono::time_point<std::chrono::steady_clock>;
+
+auto
+data(std::string key, std::string value)
+  -> std::chrono::time_point<std::chrono::steady_clock>;
+
+auto
+data(std::string key, std::string value,
+     std::chrono::time_point<std::chrono::steady_clock> scl)
+  -> std::chrono::time_point<std::chrono::steady_clock>;
+
+};  // namespace dnmt_log
 #endif
