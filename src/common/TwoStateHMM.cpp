@@ -25,6 +25,7 @@
 #include <gsl/gsl_sf_gamma.h>
 
 #include "smithlab_utils.hpp"
+#include "dnmt_logger.hpp"
 
 using std::vector;
 using std::pair;
@@ -402,7 +403,7 @@ report_param_header_for_verbose() {
       << setw(14) << "F PARAMS"
       << setw(14) << "B PARAMS"
       << setw(11) << "DELTA";
-  std::cerr << oss.str() << std::endl;
+  dnmt_log::event(oss.str());
 }
 
 static inline double
@@ -418,8 +419,6 @@ report_params_for_verbose(const size_t i,
                           const TwoStateBetaBin &bg_distro,
                           const double total,
                           const double prev_total) {
-  // std::ios_base::fmtflags orig_flags(cerr.flags());
-  // cerr.precision(2);
   std::ostringstream oss;
   oss.precision(2);
   oss << setw(3) << i + 1
@@ -429,7 +428,7 @@ report_params_for_verbose(const size_t i,
       << setw(14) << bg_distro.tostring()
       << setw(11) << std::scientific
       << abs(get_delta(prev_total, total));
-  cerr << oss.str() << endl;
+  dnmt_log::event(oss.str());
 }
 
 
@@ -498,7 +497,7 @@ TwoStateHMM::BaumWelchTraining(const vector<pair<double, double> > &values,
 
     if (converged) {
       if (VERBOSE)
-        std::cerr << "CONVERGED" << std::endl;
+        dnmt_log::event("CONVERGED");
     }
     else {
       p_fb = p_fb_est;
@@ -1029,7 +1028,7 @@ TwoStateHMM::BaumWelchTraining(const vector<vector<pair<double, double> > > &val
 
     if (converged) {
       if (VERBOSE)
-        cerr << "CONVERGED" << endl;
+        dnmt_log::event("CONVERGED");
     }
     else {
       p_fb = p_fb_est;

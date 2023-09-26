@@ -36,6 +36,7 @@
 #include "bsutils.hpp"
 #include "dnmt_error.hpp"
 #include "bam_record_utils.hpp"
+#include "bam_record_utils.hpp"
 
 /* HTSlib */
 #include <htslib/sam.h>

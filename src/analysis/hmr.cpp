@@ -302,14 +302,17 @@ read_params_file(const bool VERBOSE,
      >> jnk >> p_fb
      >> jnk >> p_bf
      >> jnk >> domain_score_cutoff;
-  if (VERBOSE)
-    cerr << "FG_ALPHA\t" << fg_alpha << endl
-         << "FG_BETA\t" << fg_beta << endl
-         << "BG_ALPHA\t" << bg_alpha << endl
-         << "BG_BETA\t" << bg_beta << endl
-         << "F_B\t" << p_fb << endl
-         << "B_F\t" << p_bf << endl
-         << "DOMAIN_SCORE_CUTOFF\t" << domain_score_cutoff << endl;
+  if (VERBOSE) {
+    std::ostringstream oss;
+    oss << "FG_ALPHA\t" << fg_alpha << endl
+        << "FG_BETA\t" << fg_beta << endl
+        << "BG_ALPHA\t" << bg_alpha << endl
+        << "BG_BETA\t" << bg_beta << endl
+        << "F_B\t" << p_fb << endl
+        << "B_F\t" << p_bf << endl
+        << "DOMAIN_SCORE_CUTOFF\t" << domain_score_cutoff;
+    dnmt_log::event(oss.str());
+  }
 }
 
 static void
@@ -494,10 +497,8 @@ main_hmr(int argc, const char **argv) {
     if (VERBOSE)
       log_time_point = dnmt_log::event("reading methylation levels");
     load_cpgs(cpgs_file, cpgs, meth, reads);
-    if (VERBOSE) {
+    if (VERBOSE)
       dnmt_log::event("done reading methylation levels", log_time_point);
-      // log.event("done reading methylation levels", log_time_point);
-    }
 
     if (VERBOSE)
       log_time_point = dnmt_log::event("checking if input is properly formatted");
