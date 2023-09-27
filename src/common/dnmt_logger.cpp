@@ -32,8 +32,8 @@ using std::timespec;
 using std::timespec_get;
 using std::strftime;
 
-static inline string
-format_current_time() {
+static inline auto
+format_current_time() -> string {
   static constexpr auto time_template = "[%D %T]";
   timespec ts;
   timespec_get(&ts, TIME_UTC);
@@ -56,8 +56,8 @@ format_elapsed_time(time_point<steady_clock> then) -> string {
   return formatted_delta_time;
 }
 
-time_point<steady_clock>
-dnmt_log::screen::event(string message) {
+auto
+dnmt_log::screen::event(string message) -> time_point<steady_clock> {
   static constexpr auto event_tag = "[event]";
   // clang-format off
   log_stream << prefix << ' '
@@ -69,8 +69,8 @@ dnmt_log::screen::event(string message) {
   return steady_clock::now();
 }
 
-time_point<steady_clock>
-dnmt_log::screen::event(string message, time_point<steady_clock> then) {
+auto
+dnmt_log::screen::event(string message, time_point<steady_clock> then) -> time_point<steady_clock> {
   static constexpr auto event_tag = "[event]";
   // clang-format off
   log_stream << prefix << ' '
@@ -83,8 +83,8 @@ dnmt_log::screen::event(string message, time_point<steady_clock> then) {
   return steady_clock::now();
 }
 
-time_point<steady_clock>
-dnmt_log::screen::data(string key, string value) {
+auto
+dnmt_log::screen::data(string key, string value) -> time_point<steady_clock> {
   static constexpr auto data_tag = "[data]";
   // clang-format off
   log_stream << prefix << ' '
@@ -96,9 +96,9 @@ dnmt_log::screen::data(string key, string value) {
   return steady_clock::now();
 }
 
-time_point<steady_clock>
+auto
 dnmt_log::screen::data(string key, string value,
-                       time_point<steady_clock> then) {
+                       time_point<steady_clock> then) -> time_point<steady_clock> {
   static constexpr auto data_tag = "[data]";
   // clang-format off
   log_stream << prefix << ' '
@@ -110,8 +110,8 @@ dnmt_log::screen::data(string key, string value,
   return steady_clock::now();
 }
 
-time_point<steady_clock>
-dnmt_log::logfile::event(string message) {
+auto
+dnmt_log::logfile::event(string message) -> time_point<steady_clock> {
   static constexpr auto event_tag = "[event]";
   // clang-format off
   log_stream << prefix << ' '
@@ -123,8 +123,8 @@ dnmt_log::logfile::event(string message) {
   return steady_clock::now();
 }
 
-time_point<steady_clock>
-dnmt_log::logfile::event(string message, time_point<steady_clock> then) {
+auto
+dnmt_log::logfile::event(string message, time_point<steady_clock> then) -> time_point<steady_clock> {
   static constexpr auto event_tag = "[event]";
   // clang-format off
   log_stream << prefix << ' '
@@ -137,8 +137,8 @@ dnmt_log::logfile::event(string message, time_point<steady_clock> then) {
   return steady_clock::now();
 }
 
-time_point<steady_clock>
-dnmt_log::logfile::data(string key, string value) {
+auto
+dnmt_log::logfile::data(string key, string value) -> time_point<steady_clock> {
   static constexpr auto data_tag = "[data]";
   // clang-format off
   log_stream << prefix << ' '
@@ -150,8 +150,8 @@ dnmt_log::logfile::data(string key, string value) {
   return steady_clock::now();
 }
 
-time_point<steady_clock>
-dnmt_log::logfile::data(string key, string value, time_point<steady_clock> then) {
+auto
+dnmt_log::logfile::data(string key, string value, time_point<steady_clock> then) -> time_point<steady_clock> {
   static constexpr auto data_tag = "[data]";
   // clang-format off
   log_stream << prefix << ' '
