@@ -76,6 +76,8 @@ private:
   std::string prefix;
   std::ofstream log_stream;
 
+  // ADS: problem below, as there is no check for success in opening
+  // the output log file.
   logfile(std::string p, std::string fn)
     : prefix{p}, log_stream{std::ofstream(fn, std::ios_base::app)} {}
 };
