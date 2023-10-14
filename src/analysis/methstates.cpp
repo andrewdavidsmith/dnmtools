@@ -23,6 +23,7 @@
 #include <stdexcept>
 #include <string>
 #include <unordered_set>
+#include <charconv>
 #include <vector>
 
 #include "OptionParser.hpp"
@@ -42,23 +43,13 @@ using std::string;
 using std::unordered_map;
 using std::unordered_set;
 using std::vector;
+using std::distance;
+using std::min;
+using std::swap;
 
 using bamxx::bam_rec;
 
 static const char b2c[] = "TNGNNNCNNNNNNNNNNNNA";
-
-struct quick_buf : public std::ostringstream,
-                   public std::basic_stringbuf<char> {
-  // ADS: consider putting this class in a header somewhere
-  quick_buf() { static_cast<std::basic_ios<char> &>(*this).rdbuf(this); }
-
-  void clear() { setp(pbase(), pbase()); }
-
-  char const *c_str() {
-    *pptr() = '\0';
-    return pbase();
-  }
-};
 
 template<class BidirIt, class OutputIt>
 // constexpr // since C++20
@@ -68,7 +59,7 @@ revcomp_copy(BidirIt first, BidirIt last, OutputIt d_first) {
   return d_first;
 }
 
-inline static bool
+static inline bool
 is_cpg(const string &s, const uint64_t idx) {
   return s[idx] == 'C' && s[idx + 1] == 'G';
 }
@@ -179,9 +170,39 @@ get_chrom(const string &chrom_name, const vector<string> &all_chroms,
   if (chrom.empty()) throw dnmt_error("problem with chrom: " + chrom_name);
 }
 
+struct state_set {
+  int32_t tid{};
+  uint64_t pos{};
+  string seq{};
+  state_set(int32_t tid, uint64_t pos, string &&seq)
+    : tid{tid}, pos{pos}, seq{move(seq)} {}
+  uint32_t serialize(const bamxx::bam_header &hdr, char *buf, const uint32_t buf_size) const {
+    const auto b_end = buf + buf_size;
+    auto b_itr = buf;
+
+    auto n_itr = sam_hdr_tid2name(hdr.h, tid);
+    while (b_itr != b_end && *n_itr != '\0') *b_itr++ = *n_itr++;
+    *b_itr++ = '\t';
+
+    auto [ptr, ec] = std::to_chars(b_itr, b_end, pos);
+    b_itr = ptr;
+    *b_itr++ = '\t';
+
+    const auto n = size(seq);
+    copy_n(cbegin(seq), n, b_itr);
+    b_itr += n;
+    *b_itr++ = '\n';
+
+    return distance(buf, b_itr);
+  }
+};
+
 int
 main_methstates(int argc, const char **argv) {
   try {
+
+    constexpr uint32_t buf_size = 1024;
+
     const string description =
       "Convert mapped reads in SAM format into a format that indicates binary \
       sequences of methylation states in each read, indexed by the identity   \
@@ -268,7 +289,18 @@ main_methstates(int argc, const char **argv) {
     string chrom_name;
     string chrom;
 
-    quick_buf buf;
+    vector<char> buf(buf_size, '\0');
+    vector<state_set> out1;
+    vector<state_set> out2;
+
+    // If the next position precedes both pos1 and pos2, we have moved
+    // to a new tid, and we output everything in out1 and out2. If the
+    // next position matches one of pos1 or pos2, we enqueue the
+    // record for the appropriate among out1 or out2. If the next
+    // position follows pos1 and pos2, then we will never again see
+    // the earlier of pos1 and pos2, so all records matching the
+    // earlier of pos1 or pos2 can be written.
+    uint64_t pos1{}, pos2{};
 
     // iterate over records/reads in the SAM file, sequentially
     // processing each before considering the next
@@ -297,13 +329,61 @@ main_methstates(int argc, const char **argv) {
           : convert_meth_states_pos(cpgs, hdr, aln, first_cpg_index, seq);
 
       if (has_cpgs) {
-        buf.clear();
-        buf << sam_hdr_tid2name(hdr, aln) << '\t' << first_cpg_index << '\t'
-            << seq << '\n';
-        if (!out.write(buf.c_str(), buf.tellp())) {
-          cerr << "failure writing output" << endl;
-          return EXIT_FAILURE;
+        if (first_cpg_index == pos2)
+          out2.emplace_back(get_tid(aln), first_cpg_index, move(seq));
+        else if (first_cpg_index == pos1)
+          out1.emplace_back(get_tid(aln), first_cpg_index, move(seq));
+        else {
+          for (const auto &x : out1) {
+            const auto n_bytes = x.serialize(hdr, buf.data(), buf_size);
+            if (!out.write(buf.data(), n_bytes)) {
+              cerr << "failure writing output" << endl;
+              return EXIT_FAILURE;
+            }
+          }
+          out1.clear();
+          pos1 = 0; // if this is equal to pos2, as happens on advance
+                    // of tid, out2 will be used by order of
+                    // conditions above, and we might flush an empty
+                    // queue once per tid; otherwise this value will
+                    // never be used
+
+          if (first_cpg_index < min(pos1, pos2)) {
+            // advance tid: just flushed out1, but we need to also
+            // flush out2 and then out2 will be ready
+            for (const auto &x : out2) {
+              const auto n_bytes = x.serialize(hdr, buf.data(), buf_size);
+              if (!out.write(buf.data(), n_bytes)) {
+                cerr << "failure writing output" << endl;
+                return EXIT_FAILURE;
+              }
+            }
+            out2.clear();
+          }
+          else {
+            // advancing pos: just flushed out1, so swap and out2 is
+            // ready for current aln
+            swap(pos1, pos2);
+            swap(out1, out2);
+          }
+
+          pos2 = first_cpg_index;
+          out2.emplace_back(get_tid(aln), first_cpg_index, move(seq));
         }
+      }
+    }
+    for (const auto &x : out1) {
+      const auto n_bytes = x.serialize(hdr, buf.data(), buf_size);
+      if (!out.write(buf.data(), n_bytes)) {
+        cerr << "failure writing output" << endl;
+        return EXIT_FAILURE;
+      }
+    }
+    for (const auto &x : out2) {
+      const auto n_bytes = x.serialize(hdr, buf.data(), buf_size);
+      if (!out.write(buf.data(), n_bytes)) {
+        cerr << "failure writing output" << endl;
+        return EXIT_FAILURE;
       }
     }
   }
