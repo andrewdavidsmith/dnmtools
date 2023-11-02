@@ -1,5 +1,5 @@
 /* guessprotocol: a program for guessing whether a wgbs protocol is
- * wgbs, pbat or random pbat
+ * wgbs, pbat or random pbat; also checks if the protocol is RRBS
  *
  * Copyright (C) 2019-2023 Andrew D. Smith
  *
@@ -45,6 +45,32 @@ using std::vector;
 
 using bamxx::bgzf_file;
 
+static inline auto
+entropy(const vector<double> &v) -> double {
+  return
+    transform_reduce(cbegin(v), cend(v), 0.0, std::plus<double>(),
+                     [](const double x) -> double {
+                       return x > 0.0 ? x*log(x)/log(2.0) : x;
+                     });
+}
+
+static inline auto
+is_cpg_pos(const string &s, const uint32_t idx) -> bool {
+  return std::toupper(s[idx]) == 'C' &&
+    (idx < size(s) - 1 && std::toupper(s[idx + 1]) == 'G');
+}
+
+static inline auto
+is_cpg_neg(const string &s, const uint32_t idx) -> bool {
+  return std::toupper(s[idx]) == 'G' &&
+    (idx > 0 && std::toupper(s[idx - 1]) == 'C');
+}
+
+static inline uint8_t
+complement_index(const uint8_t c) {
+  return 3u - c;
+}
+
 constexpr int nuc_to_idx[] = {
  /*  0*/  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
  /* 16*/  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
@@ -64,6 +90,16 @@ constexpr int nuc_to_idx[] = {
           4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
 };
 
+
+static inline auto
+get_five_prime_kmer(const string &s, const uint32_t k) -> uint32_t {
+  uint32_t r = 0;
+  for (auto i = 0u; i < k; ++i)
+    r = (r << 2) | nuc_to_idx[static_cast<uint8_t>(s[i])];
+  return r;
+}
+
+
 struct nucleotide_model {
   vector<double> pr{};
   vector<double> lpr{};
@@ -71,8 +107,8 @@ struct nucleotide_model {
   bool is_t_rich{};
 
   nucleotide_model(const vector<double> &bc, const double conv_rate,
-                   const bool itr)
-      : pr{bc}, bisulfite_conversion_rate{conv_rate}, is_t_rich{itr} {
+                   const bool is_t_rich)
+      : pr{bc}, bisulfite_conversion_rate{conv_rate}, is_t_rich{is_t_rich} {
     auto nuc_from = is_t_rich ? 1 : 2;
     auto nuc_to = is_t_rich ? 3 : 0;
     pr[nuc_to] += bisulfite_conversion_rate * pr[nuc_from];
@@ -80,7 +116,7 @@ struct nucleotide_model {
     assert(reduce(cbegin(pr), cend(pr), 0.0) == 1.0);
     lpr.resize(std::size(pr));
     transform(cbegin(pr), cend(pr), begin(lpr),
-              [](const double x) { return log(x); });
+              [](const double x) { return std::log(x); });
   }
 
   double operator()(const string &s) const {
@@ -94,13 +130,131 @@ struct nucleotide_model {
   string tostring() const {
     std::ostringstream oss;
     oss << "pr:\n";
-    for (auto i : pr) oss << i << '\n';
+    for (const auto i : pr) oss << i << '\n';
     oss << "log pr:\n";
-    for (auto i : lpr) oss << i << '\n';
+    for (const auto i : lpr) oss << i << '\n';
     oss << bisulfite_conversion_rate << '\n' << is_t_rich;
     return oss.str();
   }
 };
+
+static inline auto
+apply_nucleotide_model(const uint32_t k,
+                       const vector<uint32_t> &c,
+                       const nucleotide_model &m) -> double {
+  double tot = 0.0;
+  for (auto i = 0u; i < size(c); ++i) {
+    double tmp = 0.0;
+    auto x = i;
+    for (auto j = 0u; j < k; ++j) {
+      tmp += m.lpr[x & 3];
+      x /= 4;
+    }
+    tot += c[i]*tmp;
+  }
+  return tot;
+}
+
+template<typename T> static inline auto
+apply_nucleotide_model(const uint32_t k, const nucleotide_model &m)
+  -> vector<double> {
+  const auto dim = (1 << 2 * k);
+  auto u = vector<double>(dim, 0.0);
+  for (auto i = 0u; i < dim; ++i) {
+    double tot = 0.0;
+    auto x = i;
+    for (auto j = 0u; j < k; ++j) {
+      tot += m.lpr[x & 3];
+      x /= 4;
+    }
+    u[i] = tot;
+  }
+  return u;
+}
+
+static inline auto
+add_pseudocount(const double pseudocount, vector<double> &p) -> void {
+  transform(cbegin(p), cend(p), begin(p),
+            [=](const double x) { return x + pseudocount; });
+  const auto tot = reduce(cbegin(p), cend(p), 0.0);
+  transform(cbegin(p), cend(p), begin(p),
+            [=](const double x) { return x / tot; });
+}
+
+
+struct rrbs_model {
+  string name{};
+  vector<string> consensus{};
+  vector<vector<double>> pr{};
+  vector<vector<double>> lpr{};
+
+  rrbs_model(const string &name, const vector<string> &consensus,
+             const uint32_t alphabet_size, const double pseudocount)
+    : name{name}, consensus{consensus} {
+    // alternate model
+    pr.resize(size(consensus.front()), vector<double>(alphabet_size, 0.0));
+    for (auto i = 0u; i < size(consensus); ++i) {
+      for (auto j = 0u; j < size(consensus[i]); ++j) {
+        const uint8_t b = consensus[i][j];
+        pr[j][nuc_to_idx[b]] += 1.0;
+      }
+    }
+
+    for (auto &p : pr) add_pseudocount(pseudocount, p);
+
+    lpr = pr;
+    for (auto &p : lpr)
+      transform(cbegin(p), cend(p), begin(p),
+                [](const double x) { return std::log(x); });
+  }
+
+  // auto operator()(const string &s) const -> double {
+  //   auto lpr_itr = begin(lpr);
+  //   return accumulate(cbegin(s), cbegin(s) + size(consensus), 0.0,
+  //                     [&](const double x, const char c) {
+  //                       const auto i = nuc_to_idx[static_cast<uint8_t>(c)];
+  //                       return i == 4 ? x : x + (*lpr_itr++)[i];
+  //                     });
+
+  auto operator()(const vector<uint32_t> &c) const -> double {
+    const auto k = size(consensus.front());
+    double tot = 0.0;
+    for (auto i = 0u; i < size(c); ++i) {
+      double kmer_tot = 0.0;
+      auto position = i;
+      for (auto j = 0u; j < k; ++j) {
+        kmer_tot += lpr[k - j - 1][position & 3];
+        position >>= 2;
+      }
+      tot += c[i]*kmer_tot;
+    }
+    return tot;
+  }
+
+  auto tostring() const -> string {
+    constexpr auto precision_val = 4u;
+    std::ostringstream oss;
+    oss.precision(precision_val);
+    oss.setf(std::ios_base::fixed, std::ios_base::floatfield);
+    oss << "name: " << name << '\n';
+    oss << "consensus:\n";
+    for (const auto &c : consensus)
+      oss << c << ",\n";
+    oss << "pr:\n";
+    for (const auto &i : pr) {
+      for (const auto j : i) oss << j << ' ';
+      oss << '\n';
+    }
+    oss << "lpr:\n";
+    for (const auto &i : lpr) {
+      for (const auto j : i) oss << j << ' ';
+      oss << '\n';
+    }
+    return oss.str();
+  }
+};
+
+
 
 struct guessprotocol_summary {
 
@@ -127,6 +281,10 @@ struct guessprotocol_summary {
   // wgbs_fraction is the probability that a read (for single-ended reads) or
   // the read1 of a read pair (for paired reads) is T-rich.
   double wgbs_fraction{};
+  // rrbs_fraction is the sum over all reads of the probability that
+  // the read is from RRBS as indicated by the prefix of the read.
+  double rrbs_fraction{};
+
 
   void evaluate() {
 
@@ -163,6 +321,7 @@ struct guessprotocol_summary {
     }
 
     wgbs_fraction = frac;
+    rrbs_fraction = rrbs_fraction / n_reads;
   }
 
   string tostring() const {
@@ -171,7 +330,8 @@ struct guessprotocol_summary {
         << "confidence: " << confidence << '\n'
         << "wgbs_fraction: " << wgbs_fraction  << '\n'
         << "n_reads_wgbs: " << n_reads_wgbs << '\n'
-        << "n_reads: " << n_reads;
+        << "n_reads: " << n_reads << '\n'
+        << "rrbs_fraction: " << rrbs_fraction;
     return oss.str();
   }
 };
@@ -233,6 +393,7 @@ main_guessprotocol(int argc, const char **argv) {
 
   try {
 
+    constexpr auto alphabet_size = 4u;
     static const vector<double> human_base_comp = {0.295, 0.205, 0.205, 0.295};
     static const vector<double> flat_base_comp = {0.25, 0.25, 0.25, 0.25};
 
@@ -244,6 +405,8 @@ main_guessprotocol(int argc, const char **argv) {
     size_t reads_to_check = 1000000;
     size_t name_suffix_len = 0;
     double bisulfite_conversion_rate = 0.98;
+    double pseudocount = 0.1;
+    uint32_t kmer = 3;
 
     namespace fs = std::filesystem;
     const string cmd_name = std::filesystem::path(argv[0]).filename();
@@ -305,6 +468,9 @@ main_guessprotocol(int argc, const char **argv) {
            << "bisulfite conversion: " << bisulfite_conversion_rate << '\n';
     }
 
+    const auto n_kmers = (1u << 2*kmer);
+    vector<uint32_t> kmer_count(n_kmers, 0u);
+
     if (reads_files.size() == 2) {
 
       // input: paired-end reads with end1 and end2
@@ -328,6 +494,9 @@ main_guessprotocol(int argc, const char **argv) {
 
         const auto prob_read1_t_rich = exp(ta - log_sum_log(ta, at));
         summary.n_reads_wgbs += prob_read1_t_rich;
+
+        if (r1.seq.find_first_not_of("ACGT") >= kmer)
+          ++kmer_count[get_five_prime_kmer(r1.seq, kmer)];
       }
     }
     else {
@@ -346,11 +515,33 @@ main_guessprotocol(int argc, const char **argv) {
 
         const auto prob_t_rich = exp(t - log_sum_log(t, a));
         summary.n_reads_wgbs += prob_t_rich;
+
+        if (r.seq.find_first_not_of("ACGT") >= kmer)
+          ++kmer_count[get_five_prime_kmer(r.seq, kmer)];
       }
     }
-
     summary.evaluate();
 
+    auto MspI = rrbs_model("MspI", {"CGG", "TGG"}, alphabet_size, pseudocount);
+
+    cerr << MspI.tostring() << endl;
+
+    const double mspi_evidence = MspI(kmer_count);
+    const double null_evidence = summary.wgbs_fraction > 0.5 ?
+      apply_nucleotide_model(kmer, kmer_count, t_rich_model) :
+      apply_nucleotide_model(kmer, kmer_count, a_rich_model);
+    cerr << mspi_evidence << endl;
+    cerr << null_evidence << endl;
+
+    const uint64_t tot = reduce(cbegin(kmer_count), cend(kmer_count));
+
+    vector<double> kmer_freq;
+    for (const auto p : kmer_count)
+      kmer_freq.push_back(p/static_cast<double>(tot));
+    cerr << entropy(kmer_freq) << endl;
+
+    const double prob_rrbs = exp(mspi_evidence - log_sum_log(mspi_evidence, null_evidence));
+    cout << prob_rrbs << endl;
     if (!outfile.empty()) {
       std::ofstream out(outfile);
       if (!out) throw runtime_error("failed to open: " + outfile);
