@@ -19,6 +19,7 @@
 #include <bamxx.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -26,8 +27,8 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
-#include <array>
 
 #include "OptionParser.hpp"
 #include "numerical_utils.hpp"
@@ -41,64 +42,55 @@ using std::endl;
 using std::min;
 using std::runtime_error;
 using std::string;
+using std::unordered_set;
 using std::vector;
 
 using bamxx::bgzf_file;
 
-static inline auto
-entropy(const vector<double> &v) -> double {
-  return
-    transform_reduce(cbegin(v), cend(v), 0.0, std::plus<double>(),
-                     [](const double x) -> double {
-                       return x > 0.0 ? x*log(x)/log(2.0) : x;
-                     });
+static inline auto entropy(const vector<double> &v) -> double {
+  return transform_reduce(cbegin(v), cend(v), 0.0, std::plus<double>(),
+                          [](const double x) -> double {
+                            return x > 0.0 ? x * log(x) / log(2.0) : x;
+                          });
 }
 
-static inline auto
-is_cpg_pos(const string &s, const uint32_t idx) -> bool {
+static inline auto is_cpg_pos(const string &s, const uint32_t idx) -> bool {
   return std::toupper(s[idx]) == 'C' &&
-    (idx < size(s) - 1 && std::toupper(s[idx + 1]) == 'G');
+         (idx < size(s) - 1 && std::toupper(s[idx + 1]) == 'G');
 }
 
-static inline auto
-is_cpg_neg(const string &s, const uint32_t idx) -> bool {
+static inline auto is_cpg_neg(const string &s, const uint32_t idx) -> bool {
   return std::toupper(s[idx]) == 'G' &&
-    (idx > 0 && std::toupper(s[idx - 1]) == 'C');
+         (idx > 0 && std::toupper(s[idx - 1]) == 'C');
 }
 
-static inline uint8_t
-complement_index(const uint8_t c) {
-  return 3u - c;
-}
+static inline uint8_t complement_index(const uint8_t c) { return 3u - c; }
 
 constexpr int nuc_to_idx[] = {
- /*  0*/  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
- /* 16*/  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
- /* 32*/  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
- /* 48*/  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
- /* 64*/  4, 0, 4, 1, 4, 4, 4, 2, 4, 4, 4, 4, 4, 4, 4, 4,
- /* 80*/  4, 4, 4, 4, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
- /* 96*/  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
- /*112*/  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
- /*128*/  4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-          4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /*  0*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* 16*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* 32*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* 48*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* 64*/ 4, 0, 4, 1, 4, 4, 4, 2, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* 80*/ 4, 4, 4, 4, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /* 96*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /*112*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /*128*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
 };
 
-
-static inline auto
-get_five_prime_kmer(const string &s, const uint32_t k) -> uint32_t {
+static inline auto get_five_prime_kmer(const string &s, const uint32_t k)
+    -> uint32_t {
   uint32_t r = 0;
   for (auto i = 0u; i < k; ++i)
     r = (r << 2) | nuc_to_idx[static_cast<uint8_t>(s[i])];
   return r;
 }
-
 
 struct nucleotide_model {
   vector<double> pr{};
@@ -130,18 +122,19 @@ struct nucleotide_model {
   string tostring() const {
     std::ostringstream oss;
     oss << "pr:\n";
-    for (const auto i : pr) oss << i << '\n';
+    for (const auto i : pr)
+      oss << i << '\n';
     oss << "log pr:\n";
-    for (const auto i : lpr) oss << i << '\n';
+    for (const auto i : lpr)
+      oss << i << '\n';
     oss << bisulfite_conversion_rate << '\n' << is_t_rich;
     return oss.str();
   }
 };
 
-static inline auto
-apply_nucleotide_model(const uint32_t k,
-                       const vector<uint32_t> &c,
-                       const nucleotide_model &m) -> double {
+static inline auto apply_nucleotide_model(const uint32_t k,
+                                          const vector<uint32_t> &c,
+                                          const nucleotide_model &m) -> double {
   double tot = 0.0;
   for (auto i = 0u; i < size(c); ++i) {
     double tmp = 0.0;
@@ -150,14 +143,15 @@ apply_nucleotide_model(const uint32_t k,
       tmp += m.lpr[x & 3];
       x /= 4;
     }
-    tot += c[i]*tmp;
+    tot += c[i] * tmp;
   }
   return tot;
 }
 
-template<typename T> static inline auto
-apply_nucleotide_model(const uint32_t k, const nucleotide_model &m)
-  -> vector<double> {
+template <typename T>
+static inline auto apply_nucleotide_model(const uint32_t k,
+                                          const nucleotide_model &m)
+    -> vector<double> {
   const auto dim = (1 << 2 * k);
   auto u = vector<double>(dim, 0.0);
   for (auto i = 0u; i < dim; ++i) {
@@ -172,8 +166,8 @@ apply_nucleotide_model(const uint32_t k, const nucleotide_model &m)
   return u;
 }
 
-static inline auto
-add_pseudocount(const double pseudocount, vector<double> &p) -> void {
+static inline auto add_pseudocount(const double pseudocount, vector<double> &p)
+    -> void {
   transform(cbegin(p), cend(p), begin(p),
             [=](const double x) { return x + pseudocount; });
   const auto tot = reduce(cbegin(p), cend(p), 0.0);
@@ -181,26 +175,30 @@ add_pseudocount(const double pseudocount, vector<double> &p) -> void {
             [=](const double x) { return x / tot; });
 }
 
-
 struct rrbs_model {
   string name{};
+  uint32_t k_value{};
+  unordered_set<uint32_t> consensus_keys{};
   vector<string> consensus{};
   vector<vector<double>> pr{};
   vector<vector<double>> lpr{};
 
   rrbs_model(const string &name, const vector<string> &consensus,
              const uint32_t alphabet_size, const double pseudocount)
-    : name{name}, consensus{consensus} {
+      : name{name}, consensus{consensus} {
     // alternate model
-    pr.resize(size(consensus.front()), vector<double>(alphabet_size, 0.0));
+    k_value = size(consensus.front());
+    pr.resize(k_value, vector<double>(alphabet_size, 0.0));
     for (auto i = 0u; i < size(consensus); ++i) {
       for (auto j = 0u; j < size(consensus[i]); ++j) {
         const uint8_t b = consensus[i][j];
         pr[j][nuc_to_idx[b]] += 1.0;
       }
+      consensus_keys.insert(get_five_prime_kmer(consensus[i], k_value));
     }
 
-    for (auto &p : pr) add_pseudocount(pseudocount, p);
+    for (auto &p : pr)
+      add_pseudocount(pseudocount, p);
 
     lpr = pr;
     for (auto &p : lpr)
@@ -216,19 +214,24 @@ struct rrbs_model {
   //                       return i == 4 ? x : x + (*lpr_itr++)[i];
   //                     });
 
-  auto operator()(const vector<uint32_t> &c) const -> double {
-    const auto k = size(consensus.front());
+  auto operator()(const vector<uint32_t> &kmer_count) const -> double {
     double tot = 0.0;
-    for (auto i = 0u; i < size(c); ++i) {
+    for (auto kmer = 0u; kmer < size(kmer_count); ++kmer) {
       double kmer_tot = 0.0;
-      auto position = i;
-      for (auto j = 0u; j < k; ++j) {
-        kmer_tot += lpr[k - j - 1][position & 3];
-        position >>= 2;
+      auto temp_kmer = kmer;
+      for (auto j = 0u; j < k_value; ++j) {
+        kmer_tot += lpr[k_value - j - 1][temp_kmer & 3];
+        temp_kmer >>= 2;
       }
-      tot += c[i]*kmer_tot;
+      tot += kmer_count[kmer] * kmer_tot;
     }
     return tot;
+  }
+
+  auto is_in_consensus(const string &seq) const -> bool {
+
+    return consensus_keys.find(get_five_prime_kmer(seq, k_value)) !=
+           cend(consensus_keys);
   }
 
   auto tostring() const -> string {
@@ -242,19 +245,19 @@ struct rrbs_model {
       oss << c << ",\n";
     oss << "pr:\n";
     for (const auto &i : pr) {
-      for (const auto j : i) oss << j << ' ';
+      for (const auto j : i)
+        oss << j << ' ';
       oss << '\n';
     }
     oss << "lpr:\n";
     for (const auto &i : lpr) {
-      for (const auto j : i) oss << j << ' ';
+      for (const auto j : i)
+        oss << j << ' ';
       oss << '\n';
     }
     return oss.str();
   }
 };
-
-
 
 struct guessprotocol_summary {
 
@@ -285,7 +288,6 @@ struct guessprotocol_summary {
   // the read is from RRBS as indicated by the prefix of the read.
   double rrbs_fraction{};
 
-
   void evaluate() {
 
     const auto frac = n_reads_wgbs / n_reads;
@@ -295,8 +297,7 @@ struct guessprotocol_summary {
     if (frac > wgbs_cutoff_confident) {
       protocol = "wgbs";
       confidence = "high";
-    }
-    else if (frac > wgbs_cutoff_unconfident) {
+    } else if (frac > wgbs_cutoff_unconfident) {
       protocol = "wgbs";
       confidence = "low";
     }
@@ -304,8 +305,7 @@ struct guessprotocol_summary {
     else if (frac < pbat_cutoff_confident) {
       protocol = "pbat";
       confidence = "high";
-    }
-    else if (frac < pbat_cutoff_unconfident) {
+    } else if (frac < pbat_cutoff_unconfident) {
       protocol = "pbat";
       confidence = "low";
     }
@@ -314,8 +314,7 @@ struct guessprotocol_summary {
              frac < rpbat_cutoff_confident_high) {
       protocol = "rpbat";
       confidence = "high";
-    }
-    else {
+    } else {
       protocol = "rpbat";
       confidence = "low";
     }
@@ -328,7 +327,7 @@ struct guessprotocol_summary {
     std::ostringstream oss;
     oss << "protocol: " << protocol << '\n'
         << "confidence: " << confidence << '\n'
-        << "wgbs_fraction: " << wgbs_fraction  << '\n'
+        << "wgbs_fraction: " << wgbs_fraction << '\n'
         << "n_reads_wgbs: " << n_reads_wgbs << '\n'
         << "n_reads: " << n_reads << '\n'
         << "rrbs_fraction: " << rrbs_fraction;
@@ -348,48 +347,50 @@ static bool
 mates(const size_t to_ignore_at_end, // in case names have #0/1 name ends
       const FASTQRecord &a, const FASTQRecord &b) {
   assert(to_ignore_at_end < std::size(a.name));
-  return equal(cbegin(a.name), cend(a.name) - to_ignore_at_end,
-               cbegin(b.name));
+  return equal(cbegin(a.name), cend(a.name) - to_ignore_at_end, cbegin(b.name));
 }
 
 // Read 4 lines one time from fastq and fill in the FASTQRecord structure
-static bgzf_file &
-operator>>(bgzf_file &s, FASTQRecord &r) {
+static bgzf_file &operator>>(bgzf_file &s, FASTQRecord &r) {
   constexpr auto n_error_codes = 5u;
 
   enum err_code { none, bad_name, bad_seq, bad_plus, bad_qual };
 
   static const array<runtime_error, n_error_codes> error_msg = {
-    runtime_error(""), runtime_error("failed to parse fastq name line"),
-    runtime_error("failed to parse fastq sequence line"),
-    runtime_error("failed to parse fastq plus line"),
-    runtime_error("failed to parse fastq qual line")
-  };
+      runtime_error(""), runtime_error("failed to parse fastq name line"),
+      runtime_error("failed to parse fastq sequence line"),
+      runtime_error("failed to parse fastq plus line"),
+      runtime_error("failed to parse fastq qual line")};
 
   err_code ec = err_code::none;
 
-  if (!getline(s, r.name)) return s;
+  if (!getline(s, r.name))
+    return s;
 
-  if (r.name.empty() || r.name[0] != '@') ec = err_code::bad_name;
+  if (r.name.empty() || r.name[0] != '@')
+    ec = err_code::bad_name;
 
   const auto nm_end = r.name.find_first_of(" \t");
   const auto nm_sz = (nm_end == string::npos ? r.name.size() : nm_end) - 1;
   r.name.erase(copy_n(cbegin(r.name) + 1, nm_sz, begin(r.name)), cend(r.name));
 
-  if (!getline(s, r.seq)) ec = err_code::bad_seq;
+  if (!getline(s, r.seq))
+    ec = err_code::bad_seq;
 
   string tmp;
-  if (!getline(s, tmp)) ec = err_code::bad_plus;
+  if (!getline(s, tmp))
+    ec = err_code::bad_plus;
 
-  if (!getline(s, tmp)) ec = err_code::bad_qual;
+  if (!getline(s, tmp))
+    ec = err_code::bad_qual;
 
-  if (ec != err_code::none) throw error_msg[ec];
+  if (ec != err_code::none)
+    throw error_msg[ec];
 
   return s;
 }
 
-int
-main_guessprotocol(int argc, const char **argv) {
+int main_guessprotocol(int argc, const char **argv) {
 
   try {
 
@@ -414,18 +415,19 @@ main_guessprotocol(int argc, const char **argv) {
     /****************** COMMAND LINE OPTIONS ********************/
     OptionParser opt_parse(cmd_name, description,
                            "<end1-fastq> [<end2-fastq>]");
-    opt_parse.add_opt("nreads", 'n', "number of reads in initial check",
-                      false, reads_to_check);
-    opt_parse.add_opt("ignore", 'i', "length of read name suffix "
-                      "to ignore when matching", false, name_suffix_len);
-    opt_parse.add_opt("bisulfite", 'b', "bisulfite conversion rate",
-                      false, bisulfite_conversion_rate);
-    opt_parse.add_opt("human", 'H', "assume human genome",
-                      false, use_human);
+    opt_parse.add_opt("nreads", 'n', "number of reads in initial check", false,
+                      reads_to_check);
+    opt_parse.add_opt("ignore", 'i',
+                      "length of read name suffix "
+                      "to ignore when matching",
+                      false, name_suffix_len);
+    opt_parse.add_opt("bisulfite", 'b', "bisulfite conversion rate", false,
+                      bisulfite_conversion_rate);
+    opt_parse.add_opt("human", 'H', "assume human genome", false, use_human);
     opt_parse.add_opt("output", 'o', "output file name", false, outfile);
     opt_parse.add_opt("verbose", 'v',
-                      "report available information during the run",
-                      false, verbose);
+                      "report available information during the run", false,
+                      verbose);
     vector<string> leftover_args;
     opt_parse.parse(argc, argv, leftover_args);
     if (argc == 1 || opt_parse.help_requested()) {
@@ -445,7 +447,8 @@ main_guessprotocol(int argc, const char **argv) {
     /****************** END COMMAND LINE OPTIONS *****************/
 
     auto base_comp = flat_base_comp;
-    if (use_human) base_comp = human_base_comp;
+    if (use_human)
+      base_comp = human_base_comp;
 
     nucleotide_model t_rich_model(base_comp, bisulfite_conversion_rate, true);
     nucleotide_model a_rich_model(base_comp, bisulfite_conversion_rate, false);
@@ -468,7 +471,9 @@ main_guessprotocol(int argc, const char **argv) {
            << "bisulfite conversion: " << bisulfite_conversion_rate << '\n';
     }
 
-    const auto n_kmers = (1u << 2*kmer);
+    auto MspI = rrbs_model("MspI", {"CGG", "TGG"}, alphabet_size, pseudocount);
+
+    const auto n_kmers = (1u << 2 * kmer);
     vector<uint32_t> kmer_count(n_kmers, 0u);
 
     if (reads_files.size() == 2) {
@@ -495,11 +500,14 @@ main_guessprotocol(int argc, const char **argv) {
         const auto prob_read1_t_rich = exp(ta - log_sum_log(ta, at));
         summary.n_reads_wgbs += prob_read1_t_rich;
 
-        if (r1.seq.find_first_not_of("ACGT") >= kmer)
+        if (r1.seq.find_first_not_of("ACGT") >= kmer) {
           ++kmer_count[get_five_prime_kmer(r1.seq, kmer)];
+          if (MspI.is_in_consensus(r1.seq)) {
+            summary.rrbs_fraction += 1;
+          }
+        }
       }
-    }
-    else {
+    } else {
 
       // input: single-end reads
       bgzf_file in(reads_files.front(), "r");
@@ -516,20 +524,22 @@ main_guessprotocol(int argc, const char **argv) {
         const auto prob_t_rich = exp(t - log_sum_log(t, a));
         summary.n_reads_wgbs += prob_t_rich;
 
-        if (r.seq.find_first_not_of("ACGT") >= kmer)
+        if (r.seq.find_first_not_of("ACGT") >= kmer) {
           ++kmer_count[get_five_prime_kmer(r.seq, kmer)];
+          if (MspI.is_in_consensus(r.seq))
+            summary.rrbs_fraction += 1;
+        }
       }
     }
     summary.evaluate();
 
-    auto MspI = rrbs_model("MspI", {"CGG", "TGG"}, alphabet_size, pseudocount);
-
     cerr << MspI.tostring() << endl;
 
     const double mspi_evidence = MspI(kmer_count);
-    const double null_evidence = summary.wgbs_fraction > 0.5 ?
-      apply_nucleotide_model(kmer, kmer_count, t_rich_model) :
-      apply_nucleotide_model(kmer, kmer_count, a_rich_model);
+    const double null_evidence =
+        summary.wgbs_fraction > 0.5
+            ? apply_nucleotide_model(kmer, kmer_count, t_rich_model)
+            : apply_nucleotide_model(kmer, kmer_count, a_rich_model);
     cerr << mspi_evidence << endl;
     cerr << null_evidence << endl;
 
@@ -537,19 +547,20 @@ main_guessprotocol(int argc, const char **argv) {
 
     vector<double> kmer_freq;
     for (const auto p : kmer_count)
-      kmer_freq.push_back(p/static_cast<double>(tot));
+      kmer_freq.push_back(p / static_cast<double>(tot));
     cerr << entropy(kmer_freq) << endl;
 
-    const double prob_rrbs = exp(mspi_evidence - log_sum_log(mspi_evidence, null_evidence));
+    const double prob_rrbs =
+        exp(mspi_evidence - log_sum_log(mspi_evidence, null_evidence));
     cout << prob_rrbs << endl;
     if (!outfile.empty()) {
       std::ofstream out(outfile);
-      if (!out) throw runtime_error("failed to open: " + outfile);
+      if (!out)
+        throw runtime_error("failed to open: " + outfile);
       out << summary.tostring() << endl;
-    }
-    else cout << summary.tostring() << endl;
-  }
-  catch (const runtime_error &e) {
+    } else
+      cout << summary.tostring() << endl;
+  } catch (const runtime_error &e) {
     cerr << e.what() << endl;
     return EXIT_FAILURE;
   }
