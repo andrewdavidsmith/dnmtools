@@ -284,10 +284,10 @@ struct guessprotocol_summary {
   static constexpr auto pbat_cutoff_unconfident = 0.1;
   static constexpr auto pbat_cutoff_confident = 0.01;
   static constexpr auto rrbs_cutoff_confident = 0.99;
-  static constexpr auto rrbs_positive_cutoff_unconfident = 0.9;
-  static constexpr auto rrbs_positive_cutoff_confident = 0.99;
-  static constexpr auto rrbs_negative_cutoff_unconfident = 0.1;
-  static constexpr auto rrbs_negative_cutoff_confident = 0.05;
+  static constexpr auto rrbs_positive_entropy_confident = -1;
+  static constexpr auto rrbs_positive_entropy_unconfident = -1.5;
+  static constexpr auto rrbs_negative_entropy_unconfident = -3.5;
+  static constexpr auto rrbs_negative_entropy_confident = -4;
 
   // protocol is the guessed protocol (wgbs, pbat, rpbat, or inconclusive)
   // based on the content of the reads.
@@ -312,6 +312,8 @@ struct guessprotocol_summary {
   string rrbs;
   // rrbs_confidence indicates the level of confidence in the guess.
   string rrbs_confidence;
+  // entropy indicates the variability of the first few bases of the reads.
+  double entropy{};
 
   void evaluate() {
 
@@ -347,18 +349,18 @@ struct guessprotocol_summary {
     wgbs_fraction = frac;
     rrbs_fraction = rrbs_fraction / n_reads;
 
-    if (rrbs_fraction > rrbs_positive_cutoff_confident) {
+    if (entropy > rrbs_positive_entropy_confident) {
       rrbs = "true";
       rrbs_confidence = "high";
-    } else if (rrbs_fraction > rrbs_positive_cutoff_unconfident) {
+    } else if (entropy > rrbs_positive_entropy_unconfident) {
       rrbs = "true";
       rrbs_confidence = "low";
-    } else if (rrbs_fraction < rrbs_negative_cutoff_unconfident) {
-      rrbs = "false";
-      rrbs_confidence = "low";
-    } else if (rrbs_fraction < rrbs_negative_cutoff_confident) {
+    } else if (entropy < rrbs_negative_entropy_confident) {
       rrbs = "false";
       rrbs_confidence = "high";
+    } else if (entropy < rrbs_negative_entropy_unconfident) {
+      rrbs = "false";
+      rrbs_confidence = "low";
     } else {
       rrbs = "inconclusive";
       rrbs_confidence = "low";
@@ -375,6 +377,7 @@ struct guessprotocol_summary {
         << "rrbs_fraction: " << rrbs_fraction << '\n'
         << "rrbs: " << rrbs << '\n'
         << "rrbs_confidence: " << rrbs_confidence;
+    //<< "entropy: " << entropy;
     return oss.str();
   }
 };
@@ -575,6 +578,14 @@ int main_guessprotocol(int argc, const char **argv) {
         }
       }
     }
+
+    const uint64_t tot = reduce(cbegin(kmer_count), cend(kmer_count));
+    vector<double> kmer_freq;
+    for (const auto p : kmer_count)
+      kmer_freq.push_back(p / static_cast<double>(tot));
+    // cerr << entropy(kmer_freq) << endl;
+    summary.entropy = entropy(kmer_freq);
+
     summary.evaluate();
 
     cerr << MspI.tostring() << endl;
@@ -587,18 +598,11 @@ int main_guessprotocol(int argc, const char **argv) {
     cerr << mspi_evidence << endl;
     cerr << null_evidence << endl;
 
-    const uint64_t tot = reduce(cbegin(kmer_count), cend(kmer_count));
-
-    vector<double> kmer_freq;
-    for (const auto p : kmer_count)
-      kmer_freq.push_back(p / static_cast<double>(tot));
-    cerr << entropy(kmer_freq) << endl;
-
     // const double prob_rrbs =
     // exp(mspi_evidence - log_sum_log(mspi_evidence, null_evidence));
     const double prob_rrbs = MspI.compute_rrbs_prob(
         kmer_count, summary.wgbs_fraction, t_rich_model, a_rich_model);
-    cout << prob_rrbs << endl;
+    cerr << prob_rrbs << endl;
     if (!outfile.empty()) {
       std::ofstream out(outfile);
       if (!out)
