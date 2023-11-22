@@ -3,7 +3,7 @@
  *
  * Copyright (C) 2019-2023 Andrew D. Smith
  *
- * Authors: Andrew D. Smith
+ * Authors: Andrew D. Smith, Masaru Nakajima
  *
  * This program is free software: you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -75,13 +75,14 @@ constexpr int nuc_to_idx[] = {
     /* 80*/ 4, 4, 4, 4, 3, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
     /* 96*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
     /*112*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-    /*128*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
-    4,         4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+    /*128*/ 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 
+            4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 
+            4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 
+            4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 
+            4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 
+            4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
+            4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 
+            4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,
 };
 
 static inline auto get_five_prime_kmer(const string &s, const uint32_t k)
@@ -143,7 +144,8 @@ static inline auto apply_nucleotide_model(const uint32_t k,
       tmp += m.lpr[x & 3];
       x /= 4;
     }
-    tot += c[i] * tmp;
+    // tot += c[i] * tmp;
+    tot = log_sum_log(tot, tmp + log(std::max(c[i], 1u)));
   }
   return tot;
 }
@@ -223,9 +225,23 @@ struct rrbs_model {
         kmer_tot += lpr[k_value - j - 1][temp_kmer & 3];
         temp_kmer >>= 2;
       }
-      tot += kmer_count[kmer] * kmer_tot;
+      // tot += kmer_count[kmer] * kmer_tot;
+      tot = log_sum_log(tot, kmer_tot + log(std::max(kmer_count[kmer], 1u)));
     }
     return tot;
+  }
+
+  auto compute_rrbs_prob(const vector<uint32_t> &kmer_count,
+                         const double wgbs_fraction,
+                         const nucleotide_model &t_rich_model,
+                         const nucleotide_model &a_rich_model) {
+    const double mspi_evidence = (*this)(kmer_count);
+    const double null_evidence =
+        wgbs_fraction > 0.5
+            ? apply_nucleotide_model(k_value, kmer_count, t_rich_model)
+            : apply_nucleotide_model(k_value, kmer_count, a_rich_model);
+
+    return exp(mspi_evidence - log_sum_log(mspi_evidence, null_evidence));
   }
 
   auto is_in_consensus(const string &seq) const -> bool {
@@ -267,6 +283,11 @@ struct guessprotocol_summary {
   static constexpr auto rpbat_cutoff_confident_low = 0.2;
   static constexpr auto pbat_cutoff_unconfident = 0.1;
   static constexpr auto pbat_cutoff_confident = 0.01;
+  static constexpr auto rrbs_cutoff_confident = 0.99;
+  static constexpr auto rrbs_positive_cutoff_unconfident = 0.9;
+  static constexpr auto rrbs_positive_cutoff_confident = 0.99;
+  static constexpr auto rrbs_negative_cutoff_unconfident = 0.1;
+  static constexpr auto rrbs_negative_cutoff_confident = 0.05;
 
   // protocol is the guessed protocol (wgbs, pbat, rpbat, or inconclusive)
   // based on the content of the reads.
@@ -287,6 +308,10 @@ struct guessprotocol_summary {
   // rrbs_fraction is the sum over all reads of the probability that
   // the read is from RRBS as indicated by the prefix of the read.
   double rrbs_fraction{};
+  // rrbs indicates whether RRBS was used.
+  string rrbs;
+  // rrbs_confidence indicates the level of confidence in the guess.
+  string rrbs_confidence;
 
   void evaluate() {
 
@@ -321,6 +346,23 @@ struct guessprotocol_summary {
 
     wgbs_fraction = frac;
     rrbs_fraction = rrbs_fraction / n_reads;
+
+    if (rrbs_fraction > rrbs_positive_cutoff_confident) {
+      rrbs = "true";
+      rrbs_confidence = "high";
+    } else if (rrbs_fraction > rrbs_positive_cutoff_unconfident) {
+      rrbs = "true";
+      rrbs_confidence = "low";
+    } else if (rrbs_fraction < rrbs_negative_cutoff_unconfident) {
+      rrbs = "false";
+      rrbs_confidence = "low";
+    } else if (rrbs_fraction < rrbs_negative_cutoff_confident) {
+      rrbs = "false";
+      rrbs_confidence = "high";
+    } else {
+      rrbs = "inconclusive";
+      rrbs_confidence = "low";
+    }
   }
 
   string tostring() const {
@@ -330,7 +372,9 @@ struct guessprotocol_summary {
         << "wgbs_fraction: " << wgbs_fraction << '\n'
         << "n_reads_wgbs: " << n_reads_wgbs << '\n'
         << "n_reads: " << n_reads << '\n'
-        << "rrbs_fraction: " << rrbs_fraction;
+        << "rrbs_fraction: " << rrbs_fraction << '\n'
+        << "rrbs: " << rrbs << '\n'
+        << "rrbs_confidence: " << rrbs_confidence;
     return oss.str();
   }
 };
@@ -550,8 +594,10 @@ int main_guessprotocol(int argc, const char **argv) {
       kmer_freq.push_back(p / static_cast<double>(tot));
     cerr << entropy(kmer_freq) << endl;
 
-    const double prob_rrbs =
-        exp(mspi_evidence - log_sum_log(mspi_evidence, null_evidence));
+    // const double prob_rrbs =
+    // exp(mspi_evidence - log_sum_log(mspi_evidence, null_evidence));
+    const double prob_rrbs = MspI.compute_rrbs_prob(
+        kmer_count, summary.wgbs_fraction, t_rich_model, a_rich_model);
     cout << prob_rrbs << endl;
     if (!outfile.empty()) {
       std::ofstream out(outfile);
