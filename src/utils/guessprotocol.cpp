@@ -376,8 +376,8 @@ struct guessprotocol_summary {
         << "n_reads: " << n_reads << '\n'
         << "rrbs_fraction: " << rrbs_fraction << '\n'
         << "rrbs: " << rrbs << '\n'
-        << "rrbs_confidence: " << rrbs_confidence;
-    //<< "entropy: " << entropy;
+        << "rrbs_confidence: " << rrbs_confidence << '\n'
+        << "entropy: " << entropy;
     return oss.str();
   }
 };
