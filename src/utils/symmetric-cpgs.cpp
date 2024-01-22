@@ -17,71 +17,104 @@
  * General Public License for more details.
  */
 
-#include <string>
-#include <vector>
-#include <iostream>
-#include <fstream>
-#include <stdexcept>
-#include <unordered_set>
-#include <filesystem>
 #include <bamxx.hpp>
 
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
 // from smithlab_cpp
-#include "OptionParser.hpp"
-#include "smithlab_utils.hpp"
-#include "smithlab_os.hpp"
-
 #include "MSite.hpp"
+#include "OptionParser.hpp"
+#include "smithlab_os.hpp"
+#include "smithlab_utils.hpp"
 
-using std::string;
-using std::cout;
+#include "counts_header.hpp"
+
 using std::cerr;
+using std::cout;
 using std::endl;
+using std::runtime_error;
+using std::string;
 using std::unordered_set;
 
 using bamxx::bgzf_file;
 
 static inline bool
-found_symmetric(const MSite &prev_cpg, const MSite &curr_cpg) {
+found_symmetric(const MSite &prev, const MSite &curr) {
   // assumes check for CpG already done
-  return (prev_cpg.strand == '+' && curr_cpg.strand == '-' &&
-          prev_cpg.pos + 1 == curr_cpg.pos);
+  return (prev.pos + 1 == curr.pos && prev.strand == '+' && curr.strand == '-');
+}
+
+static inline void
+ensure_positive_cpg(MSite &s) {
+  s.pos -= (s.strand == '-');
+  s.strand = '+';
+}
+
+template<class T> static std::tuple<MSite, bool>
+get_first_site(T &in, T &out) {
+  bool prev_is_cpg = false;
+  MSite prev_site;
+  string line;
+  bool within_header = true;
+  while (within_header && getline(in, line)) {
+    if (is_counts_header_line(line)) {
+      write_counts_header_line(line, out);
+    }
+    else {
+      prev_site.initialize(line.data(), line.data() + size(line));
+      if (prev_site.is_cpg()) prev_is_cpg = true;
+      within_header = false;
+    }
+  }
+  return {prev_site, prev_is_cpg};
 }
 
 template<class T> static bool
-process_sites(bgzf_file &in, T &out) {
-  MSite prev_site, curr_site;
-  bool prev_is_cpg = false;
-  if (read_site(in, prev_site))
-    if (prev_site.is_cpg()) prev_is_cpg = true;
+process_sites(T &in, T &out) {
 
+  // get the first site while dealing with the header
+  auto [prev_site, prev_is_cpg] = get_first_site(in, out);
+
+  // setup to verfiy that chromosomes are together
   unordered_set<string> chroms_seen;
+  chroms_seen.insert(prev_site.chrom);
   bool sites_are_sorted = true;
 
+  MSite curr_site;
   while (read_site(in, curr_site)) {
-    if (curr_site.is_cpg()) {
-      if (curr_site.chrom != prev_site.chrom) {
-        const auto chrom_itr = chroms_seen.find(curr_site.chrom);
-        if (chrom_itr != cend(chroms_seen)) {
-          sites_are_sorted = false;
-          break;
+    const bool same_chrom = prev_site.chrom == curr_site.chrom;
+    if (same_chrom) {
+      if (curr_site.pos <= prev_site.pos) return false;
+      if (prev_is_cpg) {
+        if (curr_site.is_mate_of(prev_site))
+          curr_site.add(prev_site);
+        else {
+          ensure_positive_cpg(prev_site);
+          write_site(out, prev_site);
         }
-        else
-          chroms_seen.insert(curr_site.chrom);
       }
-      else if (curr_site.pos <= prev_site.pos) {
-        sites_are_sorted = false;
-        break;
-      }
-      if (prev_is_cpg && found_symmetric(prev_site, curr_site)) {
-        prev_site.add(curr_site);
+    }
+    else {
+      if (chroms_seen.find(curr_site.chrom) != cend(chroms_seen)) return false;
+      chroms_seen.insert(curr_site.chrom);
+
+      if (prev_is_cpg) {
+        ensure_positive_cpg(prev_site);
         write_site(out, prev_site);
       }
-      prev_is_cpg = true;
     }
-    else
-      prev_is_cpg = false;
     std::swap(prev_site, curr_site);
+    prev_is_cpg = prev_site.is_cpg();
+  }
+  if (prev_is_cpg) {
+    ensure_positive_cpg(prev_site);
+    write_site(out, prev_site);
   }
 
   return sites_are_sorted;
@@ -91,9 +124,10 @@ int
 main_symmetric_cpgs(int argc, const char **argv) {
   try {
     // file types from HTSlib use "-" for the filename to go to stdout
-    string outfile("-");
+    string outfile{"-"};
     // (not used) bool VERBOSE = false;
     bool compress_output = false;
+    int32_t n_threads = 1;
 
     const string description =
       "Get CpG sites and make methylation levels symmetric.";
@@ -103,6 +137,7 @@ main_symmetric_cpgs(int argc, const char **argv) {
                            "<methcounts-file>");
     opt_parse.add_opt("output", 'o', "output file (default: stdout)", false,
                       outfile);
+    opt_parse.add_opt("threads", 't', "number of threads", false, n_threads);
     opt_parse.add_opt("zip", 'z', "output gzip format", false, compress_output);
     // opt_parse.add_opt("verbose", 'v', "print more run info", false, VERBOSE);
     std::vector<string> leftover_args;
@@ -127,29 +162,34 @@ main_symmetric_cpgs(int argc, const char **argv) {
     const string filename(leftover_args.front());
     /****************** END COMMAND LINE OPTIONS *****************/
 
+    if (n_threads <= 0) throw runtime_error("threads must be positive");
+    bamxx::bam_tpool tp(n_threads);
+
     // const bool show_progress = VERBOSE && isatty(fileno(stderr));
     bgzf_file in(filename, "r");
-    if (!in) throw std::runtime_error("could not open file: " + filename);
-
-    bool sites_are_sorted = true;
+    if (!in) throw runtime_error("could not open file: " + filename);
 
     // open the output file
     const string output_mode = compress_output ? "w" : "wu";
     bamxx::bgzf_file out(outfile, output_mode);
-    if (!out) throw std::runtime_error("error opening output file: " + outfile);
+    if (!out) throw runtime_error("error opening output file: " + outfile);
 
-    sites_are_sorted = process_sites(in, out);
+    if (n_threads > 1) {
+      if (in.is_bgzf()) tp.set_io(in);
+      tp.set_io(out);
+    }
+
+    const bool sites_are_sorted = process_sites(in, out);
 
     if (!sites_are_sorted) {
       namespace fs = std::filesystem;
       cerr << "sites are not sorted in: " << filename << endl;
       const fs::path outpath{outfile};
-      if (fs::exists(outpath))
-        fs::remove(outpath);
+      if (fs::exists(outpath)) fs::remove(outpath);
       return EXIT_FAILURE;
     }
   }
-  catch (const std::runtime_error &e) {
+  catch (const runtime_error &e) {
     cerr << e.what() << endl;
     return EXIT_FAILURE;
   }

@@ -145,6 +145,7 @@ noinst_LIBRARIES = libdnmtools.a
 libdnmtools_a_SOURCES = \
         src/common/dnmtools_gaussinv.cpp \
         src/common/bam_record_utils.cpp \
+        src/common/counts_header.cpp \
         src/common/BetaBin.cpp \
         src/common/EmissionDistribution.cpp \
         src/common/Epiread.cpp \
@@ -157,12 +158,13 @@ libdnmtools_a_SOURCES = \
         src/common/TwoStateHMM_PMD.cpp \
         src/common/bsutils.cpp \
         src/common/numerical_utils.cpp \
-        src/common/dnmtools_utils.cpp
+	src/common/dnmtools_utils.cpp
 
 libdnmtools_a_SOURCES += \
 	src/bamxx/bamxx.hpp \
         src/common/dnmtools_gaussinv.hpp \
 	src/common/bam_record_utils.hpp \
+	src/common/counts_header.hpp \
         src/common/BetaBin.hpp \
         src/common/EmissionDistribution.hpp \
         src/common/Epiread.hpp \
@@ -214,6 +216,11 @@ dnmtools_SOURCES += src/utils/symmetric-cpgs.cpp
 dnmtools_SOURCES += src/utils/merge-methcounts.cpp
 dnmtools_SOURCES += src/utils/lift-filter.cpp
 dnmtools_SOURCES += src/utils/fast-liftover.cpp
+dnmtools_SOURCES += src/utils/covered.cpp
+dnmtools_SOURCES += src/utils/recovered.cpp
+dnmtools_SOURCES += src/utils/kmersites.cpp
+dnmtools_SOURCES += src/utils/xcounts.cpp
+dnmtools_SOURCES += src/utils/unxcounts.cpp
 
 dnmtools_SOURCES += src/amrfinder/allelicmeth.cpp
 dnmtools_SOURCES += src/amrfinder/amrfinder.cpp

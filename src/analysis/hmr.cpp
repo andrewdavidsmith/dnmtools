@@ -33,6 +33,7 @@
 
 #include "TwoStateHMM.hpp"
 #include "MSite.hpp"
+#include "counts_header.hpp"
 
 using std::string;
 using std::vector;
@@ -47,13 +48,15 @@ using std::make_pair;
 using std::runtime_error;
 using std::to_string;
 using std::unordered_set;
+using std::accumulate;
+using std::reduce;
 
 using bamxx::bgzf_file;
 
 struct hmr_summary {
   hmr_summary(const vector<GenomicRegion> &hmrs) {
     hmr_count = hmrs.size();
-    hmr_total_size = accumulate(cbegin(hmrs), cend(hmrs), 0,
+    hmr_total_size = accumulate(cbegin(hmrs), cend(hmrs), 0ul,
                                 [](const uint64_t t, const GenomicRegion &p) {
                                   return t + p.get_width(); });
     hmr_mean_size =
@@ -179,12 +182,12 @@ build_domains(const vector<MSite> &cpgs,
 
 template <class T, class U>
 static void
-separate_regions(const bool VERBOSE,
+separate_regions(const bool verbose,
                  const size_t desert_size,
                  vector<MSite> &cpgs,
                  vector<T> &meth, vector<U> &reads,
                  vector<size_t> &reset_points) {
-  if (VERBOSE)
+  if (verbose)
     cerr << "[separating by cpg desert]" << endl;
   // eliminate the zero-read cpgs
   size_t j = 0;
@@ -218,7 +221,7 @@ separate_regions(const bool VERBOSE,
   }
   reset_points.push_back(cpgs.size());
 
-  if (VERBOSE)
+  if (verbose)
     cerr << "[cpgs retained: " << cpgs.size() << "]" << endl
          << "[deserts removed: " << reset_points.size() - 2 << "]" << endl
          << "[genome fraction covered: "
@@ -276,7 +279,7 @@ assign_p_values(const vector<double> &random_scores,
 }
 
 static void
-read_params_file(const bool VERBOSE,
+read_params_file(const bool verbose,
                  const string &params_file,
                  double &fg_alpha, double &fg_beta,
                  double &bg_alpha, double &bg_beta,
@@ -293,7 +296,7 @@ read_params_file(const bool VERBOSE,
      >> jnk >> p_fb
      >> jnk >> p_bf
      >> jnk >> domain_score_cutoff;
-  if (VERBOSE)
+  if (verbose)
     cerr << "FG_ALPHA\t" << fg_alpha << endl
          << "FG_BETA\t" << fg_beta << endl
          << "BG_ALPHA\t" << bg_alpha << endl
@@ -335,6 +338,9 @@ load_cpgs(const string &cpgs_file, vector<MSite> &cpgs,
   bgzf_file in(cpgs_file, "r");
   if (!in) throw runtime_error("failed opening file: " + cpgs_file);
 
+  if (has_counts_header(cpgs_file))
+    skip_counts_header(in);
+
   MSite prev_site, the_site;
   while (read_site(in, the_site)) {
     if (!the_site.is_cpg() || distance(prev_site, the_site) < 2)
@@ -346,9 +352,10 @@ load_cpgs(const string &cpgs_file, vector<MSite> &cpgs,
   }
 }
 
-template <class InputIterator> static double
-get_mean(InputIterator first, InputIterator last) {
-  return accumulate(first, last, 0.0)/std::distance(first, last);
+template<typename InputIterator, typename T = double> static auto
+get_mean(InputIterator first, InputIterator last) -> T {
+  return accumulate(first, last, static_cast<T>(0)) /
+         std::distance(first, last);
 }
 
 template<class T> static void
@@ -392,6 +399,8 @@ main_hmr(int argc, const char **argv) {
 
   try {
 
+    constexpr double min_coverage = 1.0;
+
     string outfile;
     string hypo_post_outfile;
     string meth_post_outfile;
@@ -401,7 +410,7 @@ main_hmr(int argc, const char **argv) {
     size_t rng_seed = 408;
 
     // run mode flags
-    bool VERBOSE = false;
+    bool verbose = false;
     bool PARTIAL_METH = false;
 
     // corrections for small values
@@ -428,15 +437,12 @@ main_hmr(int argc, const char **argv) {
     opt_parse.add_opt("desert", 'd', "max dist btwn covered cpgs in HMR",
                       false, desert_size);
     opt_parse.add_opt("itr", 'i', "max iterations", false, max_iterations);
-    opt_parse.add_opt("verbose", 'v', "print more run info", false, VERBOSE);
+    opt_parse.add_opt("verbose", 'v', "print more run info", false, verbose);
     opt_parse.add_opt("partial", '\0', "identify PMRs instead of HMRs",
                       false, PARTIAL_METH);
     opt_parse.add_opt("post-hypo", '\0', "output file for single-CpG posterior "
                       "hypomethylation probability (default: none)",
                       false, hypo_post_outfile);
-    opt_parse.add_opt("post-meth", '\0', "output file for single-CpG posteiror "
-                      "methylation probability (default: none)",
-                      false, meth_post_outfile);
     opt_parse.add_opt("post-meth", '\0', "output file for single-CpG posteiror "
                       "methylation probability (default: none)",
                       false, meth_post_outfile);
@@ -477,27 +483,42 @@ main_hmr(int argc, const char **argv) {
     vector<MSite> cpgs;
     vector<pair<double, double> > meth;
     vector<uint32_t> reads;
-    if (VERBOSE)
+    if (verbose)
       cerr << "[reading methylation levels]" << endl;
     load_cpgs(cpgs_file, cpgs, meth, reads);
 
-    if (VERBOSE)
+    if (verbose)
       cerr << "[checking if input is properly formatted]" << endl;
     check_sorted_within_chroms(begin(cpgs), end(cpgs));
     if (PARTIAL_METH)
       make_partial_meth(reads, meth);
 
-    if (VERBOSE)
-      cerr << "[total_cpgs=" << cpgs.size() << "]" << endl
-           << "[mean_coverage="
-           << get_mean(begin(reads), end(reads)) << "]" << endl;
+    const auto mean_coverage = get_mean(cbegin(reads), cend(reads));
+
+    if (verbose)
+      cerr << "[total_cpgs=" << size(cpgs) << "]" << '\n'
+           << "[mean_coverage=" << mean_coverage << "]" << endl;
+
+    // check for sufficient data
+    if (mean_coverage < static_cast<double>(min_coverage)) {
+      if (verbose)
+        cerr << "error: insufficient data"
+             << " mean_coverage=" << mean_coverage
+             << " min_coverage=" << min_coverage << endl;
+      if (!summary_file.empty()) {
+        std::ofstream summary_out(summary_file);
+        if (!summary_out) throw runtime_error("failed to open: " + summary_file);
+        summary_out << hmr_summary({}).tostring() << endl;
+      }
+      return EXIT_SUCCESS;
+    }
 
     // separate the regions by chrom and by desert, and eliminate
     // those isolated CpGs
     vector<size_t> reset_points;
-    separate_regions(VERBOSE, desert_size, cpgs, meth, reads, reset_points);
+    separate_regions(verbose, desert_size, cpgs, meth, reads, reset_points);
 
-    const TwoStateHMM hmm(tolerance, max_iterations, VERBOSE);
+    const TwoStateHMM hmm(tolerance, max_iterations, verbose);
 
     double p_fb = 0.25;
     double p_bf = 0.25;
@@ -507,7 +528,7 @@ main_hmr(int argc, const char **argv) {
     double domain_score_cutoff = std::numeric_limits<double>::max();
 
     if (!params_in_file.empty()) { // read parameters file
-      read_params_file(VERBOSE, params_in_file,
+      read_params_file(verbose, params_in_file,
                        fg_alpha, fg_beta, bg_alpha, bg_beta,
                        p_fb, p_bf, domain_score_cutoff);
       max_iterations = 0;
@@ -523,7 +544,6 @@ main_hmr(int argc, const char **argv) {
     if (max_iterations > 0)
       hmm.BaumWelchTraining(meth, reset_points, p_fb, p_bf,
                             fg_alpha, fg_beta, bg_alpha, bg_beta);
-
     // DECODE THE DOMAINS
     vector<bool> state_ids;
     vector<double> posteriors;
@@ -540,7 +560,8 @@ main_hmr(int argc, const char **argv) {
     vector<double> p_values;
     assign_p_values(random_scores, domain_scores, p_values);
 
-    if (domain_score_cutoff == numeric_limits<double>::max())
+    if (domain_score_cutoff == numeric_limits<double>::max() &&
+        !domain_scores.empty())
       domain_score_cutoff = get_stepup_cutoff(p_values, 0.01);
 
     // write parameters if requested
@@ -549,21 +570,22 @@ main_hmr(int argc, const char **argv) {
                         p_fb, p_bf, domain_score_cutoff);
 
     vector<GenomicRegion> domains;
-    build_domains(cpgs, reset_points, state_ids, domains);
+    if (!domain_scores.empty())
+      build_domains(cpgs, reset_points, state_ids, domains);
 
     std::ofstream of;
     if (!outfile.empty()) of.open(outfile.c_str());
     std::ostream out(outfile.empty() ? std::cout.rdbuf() : of.rdbuf());
 
     size_t good_hmr_count = 0;
-    for (size_t i = 0; i < domains.size(); ++i)
+    for (auto i = 0u; i < size(domains); ++i)
       if (p_values[i] < domain_score_cutoff) {
         domains[i].set_name("HYPO" + to_string(good_hmr_count++));
         out << domains[i] << '\n';
       }
 
     if (!hypo_post_outfile.empty()) {
-      if (VERBOSE)
+      if (verbose)
         cerr << "[writing=" << hypo_post_outfile << "]" << endl;
       std::ofstream out(hypo_post_outfile);
       for (size_t i = 0; i < cpgs.size(); ++i) {
@@ -576,7 +598,7 @@ main_hmr(int argc, const char **argv) {
 
     if (!meth_post_outfile.empty()) {
       std::ofstream out(meth_post_outfile);
-      if (VERBOSE)
+      if (verbose)
         cerr << "[writing=" << meth_post_outfile << "]" << endl;
       for (size_t i = 0; i < cpgs.size(); ++i) {
         GenomicRegion cpg(as_gen_rgn(cpgs[i]));
@@ -593,10 +615,6 @@ main_hmr(int argc, const char **argv) {
   }
   catch (runtime_error &e) {
     cerr << e.what() << endl;
-    return EXIT_FAILURE;
-  }
-  catch (std::bad_alloc &ba) {
-    cerr << "ERROR: could not allocate memory" << endl;
     return EXIT_FAILURE;
   }
   return EXIT_SUCCESS;

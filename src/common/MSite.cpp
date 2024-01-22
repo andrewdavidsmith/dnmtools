@@ -24,6 +24,7 @@
 #include <charconv>
 
 #include "smithlab_utils.hpp"
+#include "counts_header.hpp"
 
 using std::string;
 using std::runtime_error;
@@ -34,14 +35,13 @@ using std::cbegin;
 using std::cend;
 using std::end;
 
-MSite::MSite(const string &line) {
+
+bool
+MSite::initialize(const char *c, const char *c_end) {
   constexpr auto is_sep = [](const char x) { return x == ' ' || x == '\t'; };
   constexpr auto not_sep = [](const char x) { return x != ' ' && x != '\t'; };
 
   bool failed = false;
-
-  const auto c = line.data();
-  const auto c_end = c + line.size();
 
   auto field_s = c;
   auto field_e = find_if(field_s + 1, c_end, is_sep);
@@ -97,13 +97,24 @@ MSite::MSite(const string &line) {
     const auto [ptr, ec] = from_chars(field_s, c_end, n_reads);
     failed = failed || (ptr != c_end);
   }
+  // ADS: the value below would work for a flag
+  // pos = std::numeric_limits<decltype(pos)>::max();
 
-  if (failed) {
-    throw runtime_error("bad count line: " + line);
-    // ADS: the value below would work for a flag
-    // pos = std::numeric_limits<decltype(pos)>::max();
-  }
+  return !failed;
 }
+
+
+MSite::MSite(const string &line) {
+  if (!initialize(line.data(), line.data() + size(line)))
+    throw runtime_error("bad count line: " + line);
+}
+
+
+MSite::MSite(const char *line, const int n) {
+  if (!initialize(line, line + n))
+    throw runtime_error("bad count line: " + string(line));
+}
+
 
 string
 MSite::tostring() const {
@@ -351,7 +362,8 @@ is_msite_file(const string &file) {
   if (!in) throw runtime_error("cannot open file: " + file);
 
   string line;
-  if (!getline(in, line)) return false;
+  while (getline(in, line) && is_counts_header_line(line))
+    ;
 
   return is_msite_line(line);
 }
