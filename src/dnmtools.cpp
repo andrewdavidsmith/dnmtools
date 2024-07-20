@@ -64,6 +64,8 @@ simreads(int argc, const char **argv);
 int
 main_counts(int argc, const char **argv);
 int
+main_summary(int argc, const char **argv);
+int
 main_allelicmeth(int argc, const char **argv);
 int
 main_amrfinder(int argc, const char **argv);
@@ -168,7 +170,8 @@ main(int argc, const char **argv) {
    {"bsrate",    "compute the BS conversion rate from BS-seq reads mapped to a genome",  main_bsrate},
    {"counts",    "get methylation levels from mapped WGBS reads",             main_counts},
    {"sym",       "get CpG sites and make methylation levels symmetric",       main_symmetric_cpgs},
-   {"levels",    "compute methylation summary statistics from a counts file", main_levels}}}},
+   {"levels",    "compute methylation summary statistics from a counts file", main_levels},
+   {"summary",   "bsrate, levels, sym, xsym and xcounts and states",          main_summary}}}},
 
 {"methylome analysis",
  {{{"hmr",       "identify hypomethylated regions", main_hmr},
