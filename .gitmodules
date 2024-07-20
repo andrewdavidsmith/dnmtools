@@ -1,12 +1,12 @@
 [submodule "src/smithlab_cpp"]
 	path = src/smithlab_cpp
-	url = ../smithlab_cpp.git
+	url = https://github.com/smithlabcode/smithlab_cpp
 	ignore = dirty
 [submodule "src/abismal"]
 	path = src/abismal
-	url = ../abismal.git
+	url = https://github.com/smithlabcode/abismal
 	ignore = dirty
 [submodule "src/bamxx"]
 	path = src/bamxx
-	url = ../bamxx.git
+	url = https://github.com/smithlabcode/bamxx
 	ignore = dirty
